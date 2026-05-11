@@ -1,0 +1,67 @@
+# Hash PayLink Photon Agent
+
+Photon-ready Telegram agent for creating and tracking Hash PayLink USDC payment requests from chat.
+
+The agent does not custody funds, sign payments, or hold private keys. It creates Hash PayLink URLs and sends them back to the user in Telegram. Payment execution remains inside Hash PayLink.
+
+## Commands
+
+```text
+/request 10 USDC for design work
+/request 25 USDC for event ticket net=solana
+/status <request-id>
+/help
+```
+
+## Environment
+
+Copy `.env.example` to `.env` and fill:
+
+```env
+HASH_PAYLINK_BASE_URL=https://hashpaylink.com
+TELEGRAM_BOT_TOKEN=
+PHOTON_PROJECT_ID=
+PHOTON_SECRET_KEY=
+DEFAULT_EVM_ADDRESS=
+DEFAULT_SOLANA_ADDRESS=
+DEFAULT_NETWORK=base
+```
+
+Use public merchant recipient addresses only. Never store private keys in this agent.
+
+## Run Locally
+
+```bash
+npm install
+npm run dev
+```
+
+Open your Telegram bot and send:
+
+```text
+/request 1 USDC for test
+```
+
+## Build
+
+```bash
+npm run build
+npm run start
+```
+
+## Photon Grant Positioning
+
+Hash PayLink Photon Agent brings non-custodial USDC payment requests into messaging. Merchants can create payment links from chat and payers complete checkout through Hash PayLink's existing smart-wallet and send-via-address flows.
+
+Photon credentials are included as first-class configuration so the same command layer can be wired to Photon Spectrum providers as Telegram access becomes available.
+
+## Minimal Architecture
+
+```text
+Telegram chat
+  -> Hash PayLink Photon Agent
+  -> Hash PayLink URL
+  -> payer completes payment on hashpaylink.com
+```
+
+No custody. No private keys. No payment execution inside Telegram.
