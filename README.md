@@ -7,8 +7,12 @@ The agent does not custody funds, sign payments, or hold private keys. It create
 ## Commands
 
 ```text
+/setevm 0xYourAddress
+/setsol YourSolanaAddress
+/network base
 /request 10 USDC for design work
 /request 25 USDC for event ticket net=solana
+/me
 /status <request-id>
 /help
 ```
@@ -25,9 +29,17 @@ PHOTON_SECRET_KEY=
 DEFAULT_EVM_ADDRESS=
 DEFAULT_SOLANA_ADDRESS=
 DEFAULT_NETWORK=base
+STORE_PATH=./data/profiles.json
 ```
 
-Use public merchant recipient addresses only. Never store private keys in this agent.
+`DEFAULT_EVM_ADDRESS` and `DEFAULT_SOLANA_ADDRESS` are optional fallback addresses. Public users should save their own recipient addresses in Telegram:
+
+```text
+/setevm 0xYourAddress
+/setsol YourSolanaAddress
+```
+
+Use public recipient addresses only. Never store private keys in this agent.
 
 ## Run Locally
 
@@ -39,6 +51,7 @@ npm run dev
 Open your Telegram bot and send:
 
 ```text
+/setevm 0xYourAddress
 /request 1 USDC for test
 ```
 

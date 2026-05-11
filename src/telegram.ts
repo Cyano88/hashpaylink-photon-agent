@@ -1,10 +1,12 @@
 import type { AppConfig } from './config.js'
 import { handleCommand } from './commands.js'
+import type { ProfileStore } from './store.js'
 
 type TelegramUpdate = {
   update_id: number
   message?: {
     chat: { id: number }
+    from?: { id: number }
     text?: string
   }
 }
@@ -15,7 +17,7 @@ type TelegramResponse<T> = {
   description?: string
 }
 
-export async function runTelegramBot(config: AppConfig) {
+export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
   let offset = 0
   const apiBase = `https://api.telegram.org/bot${config.telegramBotToken}`
 
@@ -51,9 +53,10 @@ export async function runTelegramBot(config: AppConfig) {
       for (const update of updates) {
         offset = update.update_id + 1
         const chatId = update.message?.chat.id
+        const userId = update.message?.from?.id
         const text = update.message?.text
-        if (!chatId || !text) continue
-        const result = handleCommand(text, config)
+        if (!chatId || !userId || !text) continue
+        const result = await handleCommand(text, config, { userId: String(userId), store })
         await sendMessage(chatId, result.text)
       }
     } catch (err) {

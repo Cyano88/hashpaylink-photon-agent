@@ -10,6 +10,7 @@ export type AppConfig = {
   defaultEvmAddress: string
   defaultSolanaAddress: string
   defaultNetwork: Network
+  storePath: string
 }
 
 const NETWORKS = new Set<Network>(['base', 'arbitrum', 'solana'])
@@ -42,5 +43,6 @@ export function loadConfig(): AppConfig {
     defaultEvmAddress: optional('DEFAULT_EVM_ADDRESS'),
     defaultSolanaAddress: optional('DEFAULT_SOLANA_ADDRESS'),
     defaultNetwork: network(process.env.DEFAULT_NETWORK),
+    storePath: optional('STORE_PATH') || './data/profiles.json',
   }
 }
