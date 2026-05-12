@@ -12,6 +12,11 @@ export type CommandContext = {
 }
 
 const requests = new Map<string, PaymentRequest>()
+const FOOTER = 'Built for Photon - Powered by Hash PayLink'
+
+function withFooter(lines: string[]) {
+  return [...lines, '', FOOTER].join('\n')
+}
 
 function parseNetwork(raw: string | undefined, fallback: Network): Network {
   const value = (raw ?? '').toLowerCase()
@@ -44,7 +49,7 @@ function parseRequestArgs(text: string, fallbackNetwork: Network): ParsedRequest
 }
 
 function formatRequest(request: PaymentRequest) {
-  return [
+  return withFooter([
     'Hash PayLink collection created',
     '',
     `${request.amount} USDC`,
@@ -54,7 +59,7 @@ function formatRequest(request: PaymentRequest) {
     `Pay: ${request.payUrl}`,
     '',
     `Track: ${request.dashboardUrl}`,
-  ].join('\n')
+  ])
 }
 
 function shortAddress(value: string | undefined) {
@@ -81,7 +86,7 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
 
   if (trimmed === '/start' || trimmed === '/help') {
     return {
-      text: [
+      text: withFooter([
         'Hash PayLink Agent',
         '',
         'Create USDC payment links from chat.',
@@ -95,7 +100,7 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
         '/request 25 USDC for event ticket net=solana',
         '/me',
         '/status <request-id>',
-      ].join('\n'),
+      ]),
     }
   }
 
@@ -103,31 +108,31 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     const address = trimmed.split(/\s+/)[1]
     if (!address || !isEvmAddress(address)) return { text: 'Use /setevm 0xYourEvmAddress' }
     await context.store.updateUser(context.userId, { evmAddress: address })
-    return { text: `EVM recipient saved: ${shortAddress(address)}` }
+    return { text: withFooter([`EVM recipient saved: ${shortAddress(address)}`]) }
   }
 
   if (trimmed.startsWith('/setsol')) {
     const address = trimmed.split(/\s+/)[1]
     if (!address || !isLikelySolanaAddress(address)) return { text: 'Use /setsol YourSolanaAddress' }
     await context.store.updateUser(context.userId, { solanaAddress: address })
-    return { text: `Solana recipient saved: ${shortAddress(address)}` }
+    return { text: withFooter([`Solana recipient saved: ${shortAddress(address)}`]) }
   }
 
   if (trimmed.startsWith('/network')) {
     const nextNetwork = parseNetwork(trimmed.split(/\s+/)[1], userNetwork(profile, config))
     await context.store.updateUser(context.userId, { defaultNetwork: nextNetwork })
-    return { text: `Default network saved: ${nextNetwork}` }
+    return { text: withFooter([`Default network saved: ${nextNetwork}`]) }
   }
 
   if (trimmed === '/me') {
     return {
-      text: [
+      text: withFooter([
         'Your Hash PayLink settings',
         '',
         `EVM: ${shortAddress(profile.evmAddress)}`,
         `Solana: ${shortAddress(profile.solanaAddress)}`,
         `Default network: ${userNetwork(profile, config)}`,
-      ].join('\n'),
+      ]),
     }
   }
 
@@ -162,7 +167,7 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     const request = requests.get(id)
     if (!request) return { text: 'Request not found in this bot session. Open the dashboard link to track older requests.' }
     return {
-      text: [
+      text: withFooter([
         'Payment request',
         '',
         `Amount: ${request.amount} USDC`,
@@ -171,7 +176,7 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
         `Type: ${request.kind}`,
         '',
         `Track: ${request.dashboardUrl}`,
-      ].join('\n'),
+      ]),
     }
   }
 
