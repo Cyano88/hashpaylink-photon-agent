@@ -35,6 +35,7 @@ export function buildPaymentRequest(input: BuildInput): PaymentRequest {
   params.set('mode', 'wallet')
   params.set('multi', '1')
   params.set('event', '1')
+  params.set('source', 'telegram')
 
   if (input.evmAddress) params.set('evm', input.evmAddress)
   if (input.solanaAddress) params.set('sol', input.solanaAddress)
