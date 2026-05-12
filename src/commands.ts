@@ -13,6 +13,19 @@ export type CommandContext = {
 
 const requests = new Map<string, PaymentRequest>()
 const FOOTER = 'Built for Photon - Powered by Hash PayLink'
+const NETWORK_HELP = [
+  'Supported networks',
+  '',
+  'base - Base USDC',
+  'arbitrum - Arbitrum USDC',
+  'solana - Solana USDC',
+  '',
+  'Set default:',
+  '/network solana',
+  '',
+  'Override once:',
+  '/request 10 USDC for design net=solana',
+]
 
 function withFooter(lines: string[]) {
   return [...lines, '', FOOTER].join('\n')
@@ -95,11 +108,14 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
         'Commands:',
         '/setevm 0xYourAddress',
         '/setsol YourSolanaAddress',
-        '/network base',
+        '/network solana',
+        '/networks',
         '/request 10 USDC for design work',
         '/request 25 USDC for event ticket net=solana',
         '/me',
         '/status <request-id>',
+        '',
+        `Current default network: ${userNetwork(profile, config)}`,
       ]),
     }
   }
@@ -119,9 +135,25 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
   }
 
   if (trimmed.startsWith('/network')) {
-    const nextNetwork = parseNetwork(trimmed.split(/\s+/)[1], userNetwork(profile, config))
+    const rawNetwork = trimmed.split(/\s+/)[1]
+    if (!rawNetwork) {
+      return {
+        text: withFooter([
+          `Current default network: ${userNetwork(profile, config)}`,
+          '',
+          'Use /network base, /network arbitrum, or /network solana.',
+          '',
+          ...NETWORK_HELP,
+        ]),
+      }
+    }
+    const nextNetwork = parseNetwork(rawNetwork, userNetwork(profile, config))
     await context.store.updateUser(context.userId, { defaultNetwork: nextNetwork })
-    return { text: withFooter([`Default network saved: ${nextNetwork}`]) }
+    return { text: withFooter([`Default network saved: ${nextNetwork}`, '', 'Future /request commands will use this network unless you pass net=...']) }
+  }
+
+  if (trimmed === '/networks') {
+    return { text: withFooter(NETWORK_HELP) }
   }
 
   if (trimmed === '/me') {
