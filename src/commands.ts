@@ -12,6 +12,7 @@ export type CommandContext = {
 }
 
 const requests = new Map<string, PaymentRequest>()
+const latestRequestByUser = new Map<string, string>()
 const FOOTER = 'Built for Photon - Powered by Hash PayLink'
 const NETWORK_HELP = [
   'Supported networks',
@@ -190,14 +191,15 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
       solanaAddress,
     })
     requests.set(request.id, request)
+    latestRequestByUser.set(context.userId, request.id)
     return { text: formatRequest(request) }
   }
 
   if (trimmed.startsWith('/status')) {
-    const id = trimmed.split(/\s+/)[1]
-    if (!id) return { text: 'Use /status <request-id>' }
+    const id = trimmed.split(/\s+/)[1] ?? latestRequestByUser.get(context.userId)
+    if (!id) return { text: 'No recent request found. Create one with /request 10 USDC for design.' }
     const request = requests.get(id)
-    if (!request) return { text: 'Request not found in this bot session. Open the dashboard link to track older requests.' }
+    if (!request) return { text: 'Request not found in this bot session. Open the dashboard link from the original request to track older payments.' }
     return {
       text: withFooter([
         'Payment request',
