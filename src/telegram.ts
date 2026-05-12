@@ -1,5 +1,5 @@
 import type { AppConfig } from './config.js'
-import { handleCommand } from './commands.js'
+import { handleCommand, type CommandResult } from './commands.js'
 import type { ProfileStore } from './store.js'
 
 type TelegramUpdate = {
@@ -32,12 +32,21 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
     return data.result
   }
 
-  async function sendMessage(chatId: number, text: string) {
-    await callTelegram('sendMessage', {
+  async function sendMessage(chatId: number, result: CommandResult) {
+    const body: Record<string, unknown> = {
       chat_id: chatId,
-      text,
+      text: result.text,
       disable_web_page_preview: true,
-    })
+    }
+    if (result.buttons?.length) {
+      body.reply_markup = {
+        inline_keyboard: [result.buttons.map(button => ({
+          text: button.text,
+          url: button.url,
+        }))],
+      }
+    }
+    await callTelegram('sendMessage', body)
   }
 
   console.log('Hash PayLink Photon Agent listening for Telegram messages')
@@ -57,7 +66,7 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
         const text = update.message?.text
         if (!chatId || !userId || !text) continue
         const result = await handleCommand(text, config, { userId: String(userId), store })
-        await sendMessage(chatId, result.text)
+        await sendMessage(chatId, result)
       }
     } catch (err) {
       console.error(err instanceof Error ? err.message : err)

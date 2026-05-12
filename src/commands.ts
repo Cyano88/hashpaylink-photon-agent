@@ -4,6 +4,7 @@ import type { ProfileStore, UserProfile } from './store.js'
 
 export type CommandResult = {
   text: string
+  buttons?: Array<{ text: string; url: string }>
 }
 
 export type CommandContext = {
@@ -63,17 +64,37 @@ function parseRequestArgs(text: string, fallbackNetwork: Network): ParsedRequest
 }
 
 function formatRequest(request: PaymentRequest) {
-  return withFooter([
-    'Hash PayLink collection created',
-    '',
-    `${request.amount} USDC`,
-    request.memo,
-    `Network: ${request.network}`,
-    '',
-    `Pay: ${request.payUrl}`,
-    '',
-    `Track: ${request.dashboardUrl}`,
-  ])
+  return {
+    text: withFooter([
+      'Hash PayLink collection created',
+      '',
+      `${request.amount} USDC`,
+      request.memo,
+      `Network: ${request.network}`,
+    ]),
+    buttons: requestButtons(request),
+  }
+}
+
+function requestButtons(request: PaymentRequest) {
+  return [
+    { text: 'Pay', url: request.payUrl },
+    { text: 'Track', url: request.dashboardUrl },
+  ]
+}
+
+function formatStatus(request: PaymentRequest) {
+  return {
+    text: withFooter([
+      'Latest request',
+      '',
+      `${request.amount} USDC`,
+      request.memo,
+      `Network: ${request.network}`,
+      `Type: ${request.kind}`,
+    ]),
+    buttons: requestButtons(request),
+  }
 }
 
 function shortAddress(value: string | undefined) {
@@ -193,7 +214,7 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     requests.set(request.id, request)
     latestRequestByUser.set(context.userId, request.id)
     await context.store.updateUser(context.userId, { latestRequest: request })
-    return { text: formatRequest(request) }
+    return formatRequest(request)
   }
 
   if (trimmed.startsWith('/status')) {
@@ -202,18 +223,7 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     if (!id) return { text: 'No recent request found. Create one with /request 10 USDC for design.' }
     const request = requests.get(id) ?? (profile.latestRequest?.id === id ? profile.latestRequest : undefined)
     if (!request) return { text: 'Request not found in this bot session. Open the dashboard link from the original request to track older payments.' }
-    return {
-      text: withFooter([
-        'Payment request',
-        '',
-        `Amount: ${request.amount} USDC`,
-        `Memo: ${request.memo}`,
-        `Network: ${request.network}`,
-        `Type: ${request.kind}`,
-        '',
-        `Track: ${request.dashboardUrl}`,
-      ]),
-    }
+    return formatStatus(request)
   }
 
   return { text: 'Unknown command. Use /help.' }
