@@ -192,13 +192,15 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     })
     requests.set(request.id, request)
     latestRequestByUser.set(context.userId, request.id)
+    await context.store.updateUser(context.userId, { latestRequest: request })
     return { text: formatRequest(request) }
   }
 
   if (trimmed.startsWith('/status')) {
-    const id = trimmed.split(/\s+/)[1] ?? latestRequestByUser.get(context.userId)
+    const requestedId = trimmed.split(/\s+/)[1]
+    const id = requestedId ?? latestRequestByUser.get(context.userId) ?? profile.latestRequest?.id
     if (!id) return { text: 'No recent request found. Create one with /request 10 USDC for design.' }
-    const request = requests.get(id)
+    const request = requests.get(id) ?? (profile.latestRequest?.id === id ? profile.latestRequest : undefined)
     if (!request) return { text: 'Request not found in this bot session. Open the dashboard link from the original request to track older payments.' }
     return {
       text: withFooter([

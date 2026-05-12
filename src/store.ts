@@ -5,6 +5,15 @@ export type UserProfile = {
   evmAddress?: string
   solanaAddress?: string
   defaultNetwork?: 'base' | 'arbitrum' | 'solana'
+  latestRequest?: {
+    amount: string
+    memo: string
+    network: 'base' | 'arbitrum' | 'solana'
+    kind: 'collection'
+    payUrl: string
+    dashboardUrl: string
+    id: string
+  }
 }
 
 export type StoreData = {
