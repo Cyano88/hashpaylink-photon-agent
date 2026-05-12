@@ -1,10 +1,12 @@
 # Hash PayLink Photon Agent
 
-Photon-ready Telegram agent for creating and tracking Hash PayLink USDC payment requests from chat.
+Photon-ready Telegram agent for creating and tracking Hash PayLink USDC multi-payer collections from chat.
 
 The agent does not custody funds, sign payments, or hold private keys. It creates Hash PayLink URLs and sends them back to the user in Telegram. Payment execution remains inside Hash PayLink.
 
 ## Commands
+
+`/request` creates a Hash PayLink Multi-Payer Collection by default.
 
 ```text
 /setevm 0xYourAddress
@@ -64,7 +66,7 @@ npm run start
 
 ## Photon Grant Positioning
 
-Hash PayLink Photon Agent brings non-custodial USDC payment requests into messaging. Merchants can create payment links from chat and payers complete checkout through Hash PayLink's existing smart-wallet and send-via-address flows.
+Hash PayLink Photon Agent brings non-custodial USDC collection requests into messaging. Merchants can create multi-payer payment links from chat, share them in groups, and track payer logs through Hash PayLink's existing collection dashboard.
 
 Photon credentials are included as first-class configuration so the same command layer can be wired to Photon Spectrum providers as Telegram access becomes available.
 
@@ -73,7 +75,7 @@ Photon credentials are included as first-class configuration so the same command
 ```text
 Telegram chat
   -> Hash PayLink Photon Agent
-  -> Hash PayLink URL
+  -> Hash PayLink Multi-Payer Collection URL
   -> payer completes payment on hashpaylink.com
 ```
 

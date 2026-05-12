@@ -4,6 +4,7 @@ export type PaymentRequest = {
   amount: string
   memo: string
   network: Network
+  kind: 'collection'
   payUrl: string
   dashboardUrl: string
   id: string
@@ -32,6 +33,8 @@ export function buildPaymentRequest(input: BuildInput): PaymentRequest {
   params.set('memo', input.memo)
   params.set('net', input.network)
   params.set('mode', 'wallet')
+  params.set('multi', '1')
+  params.set('event', '1')
 
   if (input.evmAddress) params.set('evm', input.evmAddress)
   if (input.solanaAddress) params.set('sol', input.solanaAddress)
@@ -40,6 +43,7 @@ export function buildPaymentRequest(input: BuildInput): PaymentRequest {
     amount: input.amount,
     memo: input.memo,
     network: input.network,
+    kind: 'collection',
     id,
     payUrl: `${base}/pay?${params.toString()}`,
     dashboardUrl: `${base}/dashboard?${params.toString()}`,

@@ -45,7 +45,7 @@ function parseRequestArgs(text: string, fallbackNetwork: Network): ParsedRequest
 
 function formatRequest(request: PaymentRequest) {
   return [
-    'Hash PayLink created',
+    'Hash PayLink collection created',
     '',
     `${request.amount} USDC`,
     request.memo,
@@ -85,6 +85,7 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
         'Hash PayLink Agent',
         '',
         'Create USDC payment links from chat.',
+        'Requests are multi-payer collections by default.',
         '',
         'Commands:',
         '/setevm 0xYourAddress',
@@ -167,6 +168,7 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
         `Amount: ${request.amount} USDC`,
         `Memo: ${request.memo}`,
         `Network: ${request.network}`,
+        `Type: ${request.kind}`,
         '',
         `Track: ${request.dashboardUrl}`,
       ].join('\n'),
