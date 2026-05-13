@@ -11,6 +11,7 @@ export type AppConfig = {
   defaultSolanaAddress: string
   defaultNetwork: Network
   storePath: string
+  telegramReturnUrl: string
 }
 
 const NETWORKS = new Set<Network>(['base', 'arbitrum', 'solana'])
@@ -44,5 +45,6 @@ export function loadConfig(): AppConfig {
     defaultSolanaAddress: optional('DEFAULT_SOLANA_ADDRESS'),
     defaultNetwork: network(process.env.DEFAULT_NETWORK),
     storePath: optional('STORE_PATH') || './data/profiles.json',
+    telegramReturnUrl: optional('TELEGRAM_RETURN_URL'),
   }
 }

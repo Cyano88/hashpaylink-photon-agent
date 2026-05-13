@@ -210,6 +210,7 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
       network,
       evmAddress,
       solanaAddress,
+      returnUrl: config.telegramReturnUrl,
     })
     requests.set(request.id, request)
     latestRequestByUser.set(context.userId, request.id)

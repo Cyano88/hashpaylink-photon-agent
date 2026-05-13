@@ -17,6 +17,7 @@ type BuildInput = {
   network: Network
   evmAddress: string
   solanaAddress: string
+  returnUrl?: string
 }
 
 export function createRequestId() {
@@ -36,6 +37,7 @@ export function buildPaymentRequest(input: BuildInput): PaymentRequest {
   params.set('multi', '1')
   params.set('event', '1')
   params.set('source', 'telegram')
+  if (input.returnUrl) params.set('return', input.returnUrl)
 
   if (input.evmAddress) params.set('evm', input.evmAddress)
   if (input.solanaAddress) params.set('sol', input.solanaAddress)
