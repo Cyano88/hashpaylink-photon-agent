@@ -8,6 +8,7 @@ export type UserProfile = {
   defaultNetwork?: 'base' | 'arbitrum' | 'solana'
   latestRequest?: PaymentRequest
   recentRequests?: PaymentRequest[]
+  botMessagesByChat?: Record<string, number[]>
 }
 
 export type StoreData = {
@@ -38,6 +39,23 @@ export class ProfileStore {
     this.data.users[userId] = { ...this.getUser(userId), ...patch }
     await this.save()
     return this.data.users[userId]
+  }
+
+  async addBotMessage(userId: string, chatId: string, messageId: number) {
+    const profile = this.getUser(userId)
+    const messagesByChat = { ...(profile.botMessagesByChat ?? {}) }
+    const messages = [...(messagesByChat[chatId] ?? []), messageId]
+    messagesByChat[chatId] = messages.slice(-30)
+    await this.updateUser(userId, { botMessagesByChat: messagesByChat })
+  }
+
+  async clearBotMessages(userId: string, chatId: string) {
+    const profile = this.getUser(userId)
+    const messages = [...(profile.botMessagesByChat?.[chatId] ?? [])]
+    const messagesByChat = { ...(profile.botMessagesByChat ?? {}) }
+    delete messagesByChat[chatId]
+    await this.updateUser(userId, { botMessagesByChat: messagesByChat })
+    return messages
   }
 
   private async save() {

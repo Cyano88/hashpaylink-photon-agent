@@ -16,6 +16,8 @@ export type CommandContext = {
 const requests = new Map<string, PaymentRequest>()
 const latestRequestByUser = new Map<string, string>()
 const FOOTER = 'Built for Photon - Powered by Hash PayLink'
+const MAX_USDC_WHOLE_DIGITS = 12
+const MAX_MEMO_LENGTH = 180
 const NETWORK_HELP = [
   'Supported networks',
   '',
@@ -52,13 +54,24 @@ type ParsedRequestArgs =
   | { amount: string; memo: string; network: Network }
   | { error: string }
 
+function parseUsdcAmount(rawAmount: string | undefined): string | undefined {
+  const normalized = (rawAmount ?? '').trim()
+  const match = normalized.match(/^(\d+)(?:\.(\d{1,6})?)?$/)
+  if (!match) return undefined
+  const whole = match[1].replace(/^0+(?=\d)/, '')
+  const fraction = match[2]?.replace(/0+$/, '') ?? ''
+  if (whole.length > MAX_USDC_WHOLE_DIGITS) return undefined
+  const rawUnits = BigInt(whole || '0') * 1_000_000n + BigInt((match[2] ?? '').padEnd(6, '0'))
+  if (rawUnits <= 0n) return undefined
+  return fraction ? `${whole}.${fraction}` : whole
+}
+
 function parseRequestArgs(text: string, fallbackNetwork: Network): ParsedRequestArgs {
   const parts = text.trim().split(/\s+/)
-  const rawAmount = parts[1]
-  if (!rawAmount || Number.isNaN(Number(rawAmount)) || Number(rawAmount) <= 0) {
-    return { error: 'Use /request 10 USDC for design work' }
+  const amount = parseUsdcAmount(parts[1])
+  if (!amount) {
+    return { error: 'Use /request 10 USDC for design work. Amounts must use up to 6 decimals.' }
   }
-  const amount = rawAmount
 
   let network = fallbackNetwork
   const networkFlagIndex = parts.findIndex(part => part.startsWith('network=') || part.startsWith('net='))
@@ -69,6 +82,9 @@ function parseRequestArgs(text: string, fallbackNetwork: Network): ParsedRequest
 
   const memoStart = parts[2]?.toLowerCase() === 'usdc' ? 3 : 2
   const memo = parts.slice(memoStart).join(' ').replace(/^for\s+/i, '').trim() || 'Payment request'
+  if (memo.length > MAX_MEMO_LENGTH) {
+    return { error: `Memo is too long. Keep it under ${MAX_MEMO_LENGTH} characters.` }
+  }
   return { amount, memo, network }
 }
 
@@ -250,6 +266,7 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
         '/status <request-id>',
         '/remind',
         '/remind <request-id>',
+        '/clear',
         '',
         `Current default network: ${userNetwork(profile, config)}`,
       ]),

@@ -22,8 +22,11 @@ Bot replies include the footer `Built for Photon - Powered by Hash PayLink` to k
 /status <request-id>
 /remind
 /remind <request-id>
+/clear
 /help
 ```
+
+`/clear` removes recent messages sent by the Hash PayLink bot in the current chat. Telegram only lets the bot delete messages it sent, so user messages may remain.
 
 ## Environment
 

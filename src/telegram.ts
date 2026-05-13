@@ -5,6 +5,7 @@ import type { ProfileStore } from './store.js'
 type TelegramUpdate = {
   update_id: number
   message?: {
+    message_id: number
     chat: { id: number }
     from?: { id: number }
     text?: string
@@ -15,6 +16,10 @@ type TelegramResponse<T> = {
   ok: boolean
   result: T
   description?: string
+}
+
+type TelegramMessage = {
+  message_id: number
 }
 
 export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
@@ -53,7 +58,19 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
         }))),
       }
     }
-    await callTelegram('sendMessage', body)
+    return callTelegram<TelegramMessage>('sendMessage', body)
+  }
+
+  async function deleteMessage(chatId: number, messageId: number) {
+    try {
+      await callTelegram('deleteMessage', {
+        chat_id: chatId,
+        message_id: messageId,
+      })
+      return true
+    } catch {
+      return false
+    }
   }
 
   console.log('Hash PayLink Photon Agent listening for Telegram messages')
@@ -68,12 +85,31 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
 
       for (const update of updates) {
         offset = update.update_id + 1
-        const chatId = update.message?.chat.id
-        const userId = update.message?.from?.id
-        const text = update.message?.text
+        const message = update.message
+        const chatId = message?.chat.id
+        const userId = message?.from?.id
+        const text = message?.text
         if (!chatId || !userId || !text) continue
+
+        if (text.trim() === '/clear') {
+          const tracked = await store.clearBotMessages(String(userId), String(chatId))
+          const deleted = (await Promise.all(tracked.map(messageId => deleteMessage(chatId, messageId))))
+            .filter(Boolean).length
+          await deleteMessage(chatId, message.message_id)
+          const confirmation = await sendMessage(chatId, {
+            text: deleted > 0
+              ? `Cleared ${deleted} recent Hash PayLink bot message${deleted === 1 ? '' : 's'}.`
+              : 'No recent Hash PayLink bot messages found to clear.',
+          })
+          setTimeout(() => {
+            void deleteMessage(chatId, confirmation.message_id)
+          }, 5_000)
+          continue
+        }
+
         const result = await handleCommand(text, config, { userId: String(userId), store })
-        await sendMessage(chatId, result)
+        const sent = await sendMessage(chatId, result)
+        await store.addBotMessage(String(userId), String(chatId), sent.message_id)
       }
     } catch (err) {
       console.error(err instanceof Error ? err.message : err)
