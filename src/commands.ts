@@ -30,6 +30,14 @@ const NETWORK_HELP = [
   '/request 10 USDC for design net=solana',
 ]
 
+type RequestStats = {
+  ok: boolean
+  count: number
+  collected: number
+  archived: number
+  error?: string
+}
+
 function withFooter(lines: string[]) {
   return [...lines, '', FOOTER].join('\n')
 }
@@ -84,7 +92,55 @@ function requestButtons(request: PaymentRequest) {
   ]
 }
 
-function formatStatus(request: PaymentRequest) {
+function formatUsdc(value: number) {
+  if (!Number.isFinite(value)) return '0'
+  return value.toLocaleString('en-US', {
+    minimumFractionDigits: value > 0 && value < 1 ? 2 : 0,
+    maximumFractionDigits: 6,
+  })
+}
+
+async function fetchRequestStats(request: PaymentRequest, config: AppConfig): Promise<RequestStats> {
+  try {
+    const base = config.hashPayLinkBaseUrl.replace(/\/+$/, '')
+    const url = `${base}/api/list-event-payments?id=${encodeURIComponent(request.id)}`
+    const response = await fetch(url)
+    const data = await response.json() as {
+      ok?: boolean
+      error?: string
+      payments?: Array<{ amount?: string; ogTxHash?: string }>
+    }
+    if (!response.ok || !data.ok) throw new Error(data.error ?? 'Status unavailable')
+    const payments = data.payments ?? []
+    return {
+      ok: true,
+      count: payments.length,
+      collected: payments.reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0),
+      archived: payments.filter(payment => !!payment.ogTxHash).length,
+    }
+  } catch (err) {
+    return {
+      ok: false,
+      count: 0,
+      collected: 0,
+      archived: 0,
+      error: 'Try again shortly.',
+    }
+  }
+}
+
+function progressLines(stats: RequestStats) {
+  if (!stats.ok) return ['Live status: unavailable', stats.error ?? 'Try again shortly.']
+  if (stats.count === 0) return ['Live status: no payments yet']
+  return [
+    `Live status: ${stats.count} payment${stats.count === 1 ? '' : 's'} received`,
+    `Collected: ${formatUsdc(stats.collected)} USDC`,
+    `0G archive: ${stats.archived}/${stats.count}`,
+  ]
+}
+
+async function formatStatus(request: PaymentRequest, config: AppConfig) {
+  const stats = await fetchRequestStats(request, config)
   return {
     text: withFooter([
       'Latest request',
@@ -93,16 +149,35 @@ function formatStatus(request: PaymentRequest) {
       request.memo,
       `Network: ${request.network}`,
       `Type: ${request.kind}`,
+      '',
+      ...progressLines(stats),
     ]),
     buttons: requestButtons(request),
   }
 }
 
-function formatRecentRequests(requests: PaymentRequest[]) {
+async function formatReminder(request: PaymentRequest, config: AppConfig) {
+  const stats = await fetchRequestStats(request, config)
+  return {
+    text: withFooter([
+      'Payment reminder',
+      '',
+      `${request.amount} USDC`,
+      request.memo,
+      `Network: ${request.network}`,
+      '',
+      ...progressLines(stats),
+    ]),
+    buttons: requestButtons(request),
+  }
+}
+
+async function formatRecentRequests(requests: PaymentRequest[], config: AppConfig) {
   const recent = requests.slice(0, 5)
   if (!recent.length) {
     return { text: 'No recent requests found. Create one with /request 10 USDC for design.' }
   }
+  const stats = await Promise.all(recent.map(request => fetchRequestStats(request, config)))
 
   return {
     text: withFooter([
@@ -111,6 +186,9 @@ function formatRecentRequests(requests: PaymentRequest[]) {
       ...recent.flatMap((request, index) => [
         `${index + 1}. ${request.amount} USDC - ${request.network}`,
         request.memo,
+        stats[index]?.ok
+          ? `${stats[index].count} paid · ${formatUsdc(stats[index].collected)} USDC collected`
+          : 'Live status unavailable',
         `ID: ${request.id}`,
         '',
       ]).slice(0, -1),
@@ -140,6 +218,13 @@ function userNetwork(profile: UserProfile, config: AppConfig): Network {
   return profile.defaultNetwork ?? config.defaultNetwork
 }
 
+function findRequest(id: string | undefined, profile: UserProfile) {
+  if (!id) return undefined
+  return requests.get(id)
+    ?? (profile.latestRequest?.id === id ? profile.latestRequest : undefined)
+    ?? profile.recentRequests?.find(item => item.id === id)
+}
+
 export async function handleCommand(text: string, config: AppConfig, context: CommandContext): Promise<CommandResult> {
   const trimmed = text.trim()
   const profile = context.store.getUser(context.userId)
@@ -163,6 +248,8 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
         '/requests',
         '/status',
         '/status <request-id>',
+        '/remind',
+        '/remind <request-id>',
         '',
         `Current default network: ${userNetwork(profile, config)}`,
       ]),
@@ -217,7 +304,7 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     }
   }
 
-  if (trimmed.startsWith('/request')) {
+  if (trimmed === '/request' || trimmed.startsWith('/request ')) {
     const parsed = parseRequestArgs(trimmed, userNetwork(profile, config))
     if ('error' in parsed) return { text: parsed.error }
 
@@ -249,18 +336,25 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
   }
 
   if (trimmed === '/requests') {
-    return formatRecentRequests(profile.recentRequests ?? [])
+    return formatRecentRequests(profile.recentRequests ?? [], config)
   }
 
   if (trimmed.startsWith('/status')) {
     const requestedId = trimmed.split(/\s+/)[1]
     const id = requestedId ?? latestRequestByUser.get(context.userId) ?? profile.latestRequest?.id
     if (!id) return { text: 'No recent request found. Create one with /request 10 USDC for design.' }
-    const request = requests.get(id)
-      ?? (profile.latestRequest?.id === id ? profile.latestRequest : undefined)
-      ?? profile.recentRequests?.find(item => item.id === id)
+    const request = findRequest(id, profile)
     if (!request) return { text: 'Request not found in this bot session. Open the dashboard link from the original request to track older payments.' }
-    return formatStatus(request)
+    return formatStatus(request, config)
+  }
+
+  if (trimmed.startsWith('/remind')) {
+    const requestedId = trimmed.split(/\s+/)[1]
+    const id = requestedId ?? latestRequestByUser.get(context.userId) ?? profile.latestRequest?.id
+    if (!id) return { text: 'No recent request found. Create one with /request 10 USDC for design.' }
+    const request = findRequest(id, profile)
+    if (!request) return { text: 'Request not found in this bot session. Use /requests to see saved recent requests.' }
+    return formatReminder(request, config)
   }
 
   return { text: 'Unknown command. Use /help.' }

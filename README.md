@@ -20,6 +20,8 @@ Bot replies include the footer `Built for Photon - Powered by Hash PayLink` to k
 /requests
 /status
 /status <request-id>
+/remind
+/remind <request-id>
 /help
 ```
 
