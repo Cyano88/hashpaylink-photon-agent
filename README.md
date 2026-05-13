@@ -26,6 +26,8 @@ Bot replies include the footer `Built for Photon - Powered by Hash PayLink` to k
 /help
 ```
 
+Send `/setevm` or `/setsol` without an address to open a reply prompt. Then paste only the wallet address and send.
+
 `/clear` removes recent messages sent by the Hash PayLink bot in the current chat. Telegram only lets the bot delete messages it sent, so user messages may remain.
 
 ## Environment

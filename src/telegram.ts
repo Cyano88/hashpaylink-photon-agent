@@ -9,6 +9,9 @@ type TelegramUpdate = {
     chat: { id: number }
     from?: { id: number }
     text?: string
+    reply_to_message?: {
+      text?: string
+    }
   }
 }
 
@@ -49,6 +52,12 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
           text: button.text,
           url: button.url,
         }))],
+      }
+    } else if (result.forceReplyPlaceholder) {
+      body.reply_markup = {
+        force_reply: true,
+        selective: true,
+        input_field_placeholder: result.forceReplyPlaceholder,
       }
     } else if (result.buttonRows?.length) {
       body.reply_markup = {
@@ -107,7 +116,11 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
           continue
         }
 
-        const result = await handleCommand(text, config, { userId: String(userId), store })
+        const result = await handleCommand(text, config, {
+          userId: String(userId),
+          store,
+          replyToText: message.reply_to_message?.text,
+        })
         const sent = await sendMessage(chatId, result)
         await store.addBotMessage(String(userId), String(chatId), sent.message_id)
       }

@@ -6,11 +6,13 @@ export type CommandResult = {
   text: string
   buttons?: Array<{ text: string; url: string }>
   buttonRows?: Array<Array<{ text: string; url: string }>>
+  forceReplyPlaceholder?: string
 }
 
 export type CommandContext = {
   userId: string
   store: ProfileStore
+  replyToText?: string
 }
 
 const requests = new Map<string, PaymentRequest>()
@@ -230,6 +232,33 @@ function isLikelySolanaAddress(value: string) {
   return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value)
 }
 
+function commandName(text: string) {
+  const first = text.trim().split(/\s+/)[0]?.toLowerCase() ?? ''
+  return first.split('@')[0]
+}
+
+function promptForEvmRecipient(): CommandResult {
+  return {
+    text: withFooter([
+      'Paste your EVM recipient address.',
+      '',
+      'Reply to this message with only the 0x wallet address.',
+    ]),
+    forceReplyPlaceholder: '0xYourEvmAddress',
+  }
+}
+
+function promptForSolanaRecipient(): CommandResult {
+  return {
+    text: withFooter([
+      'Paste your Solana recipient address.',
+      '',
+      'Reply to this message with only the Solana wallet address.',
+    ]),
+    forceReplyPlaceholder: 'YourSolanaAddress',
+  }
+}
+
 function userNetwork(profile: UserProfile, config: AppConfig): Network {
   return profile.defaultNetwork ?? config.defaultNetwork
 }
@@ -243,9 +272,23 @@ function findRequest(id: string | undefined, profile: UserProfile) {
 
 export async function handleCommand(text: string, config: AppConfig, context: CommandContext): Promise<CommandResult> {
   const trimmed = text.trim()
+  const cmd = commandName(trimmed)
   const profile = context.store.getUser(context.userId)
+  const replyToText = context.replyToText ?? ''
 
-  if (trimmed === '/start' || trimmed === '/help') {
+  if (/Paste your EVM recipient address/i.test(replyToText)) {
+    if (!isEvmAddress(trimmed)) return promptForEvmRecipient()
+    await context.store.updateUser(context.userId, { evmAddress: trimmed })
+    return { text: withFooter([`EVM recipient saved: ${shortAddress(trimmed)}`]) }
+  }
+
+  if (/Paste your Solana recipient address/i.test(replyToText)) {
+    if (!isLikelySolanaAddress(trimmed)) return promptForSolanaRecipient()
+    await context.store.updateUser(context.userId, { solanaAddress: trimmed })
+    return { text: withFooter([`Solana recipient saved: ${shortAddress(trimmed)}`]) }
+  }
+
+  if (cmd === '/start' || cmd === '/help') {
     return {
       text: withFooter([
         'Hash PayLink Agent',
@@ -273,21 +316,23 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     }
   }
 
-  if (trimmed.startsWith('/setevm')) {
+  if (cmd === '/setevm') {
     const address = trimmed.split(/\s+/)[1]
-    if (!address || !isEvmAddress(address)) return { text: 'Use /setevm 0xYourEvmAddress' }
+    if (!address) return promptForEvmRecipient()
+    if (!isEvmAddress(address)) return promptForEvmRecipient()
     await context.store.updateUser(context.userId, { evmAddress: address })
     return { text: withFooter([`EVM recipient saved: ${shortAddress(address)}`]) }
   }
 
-  if (trimmed.startsWith('/setsol')) {
+  if (cmd === '/setsol') {
     const address = trimmed.split(/\s+/)[1]
-    if (!address || !isLikelySolanaAddress(address)) return { text: 'Use /setsol YourSolanaAddress' }
+    if (!address) return promptForSolanaRecipient()
+    if (!isLikelySolanaAddress(address)) return promptForSolanaRecipient()
     await context.store.updateUser(context.userId, { solanaAddress: address })
     return { text: withFooter([`Solana recipient saved: ${shortAddress(address)}`]) }
   }
 
-  if (trimmed.startsWith('/network')) {
+  if (cmd === '/network') {
     const rawNetwork = trimmed.split(/\s+/)[1]
     if (!rawNetwork) {
       return {
@@ -305,11 +350,11 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     return { text: withFooter([`Default network saved: ${nextNetwork}`, '', 'Future /request commands will use this network unless you pass net=...']) }
   }
 
-  if (trimmed === '/networks') {
+  if (cmd === '/networks') {
     return { text: withFooter(NETWORK_HELP) }
   }
 
-  if (trimmed === '/me') {
+  if (cmd === '/me') {
     return {
       text: withFooter([
         'Your Hash PayLink settings',
@@ -321,7 +366,7 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     }
   }
 
-  if (trimmed === '/request' || trimmed.startsWith('/request ')) {
+  if (cmd === '/request') {
     const parsed = parseRequestArgs(trimmed, userNetwork(profile, config))
     if ('error' in parsed) return { text: parsed.error }
 
@@ -331,7 +376,7 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     const solanaAddress = profile.solanaAddress ?? config.defaultSolanaAddress
     const recipientReady = needsSolana ? !!solanaAddress : !!evmAddress
     if (!recipientReady) {
-      return { text: `Set your ${needsSolana ? 'Solana' : 'EVM'} recipient first with /set${needsSolana ? 'sol' : 'evm'}.` }
+      return needsSolana ? promptForSolanaRecipient() : promptForEvmRecipient()
     }
 
     const request = buildPaymentRequest({
@@ -352,11 +397,11 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     return formatRequest(request)
   }
 
-  if (trimmed === '/requests') {
+  if (cmd === '/requests') {
     return formatRecentRequests(profile.recentRequests ?? [], config)
   }
 
-  if (trimmed.startsWith('/status')) {
+  if (cmd === '/status') {
     const requestedId = trimmed.split(/\s+/)[1]
     const id = requestedId ?? latestRequestByUser.get(context.userId) ?? profile.latestRequest?.id
     if (!id) return { text: 'No recent request found. Create one with /request 10 USDC for design.' }
@@ -365,7 +410,7 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     return formatStatus(request, config)
   }
 
-  if (trimmed.startsWith('/remind')) {
+  if (cmd === '/remind') {
     const requestedId = trimmed.split(/\s+/)[1]
     const id = requestedId ?? latestRequestByUser.get(context.userId) ?? profile.latestRequest?.id
     if (!id) return { text: 'No recent request found. Create one with /request 10 USDC for design.' }
