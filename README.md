@@ -17,6 +17,7 @@ Bot replies include the footer `Built for Photon - Powered by Hash PayLink` to k
 /request 10 USDC for design work
 /request 25 USDC for event ticket net=solana
 /me
+/requests
 /status
 /status <request-id>
 /help

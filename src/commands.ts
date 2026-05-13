@@ -5,6 +5,7 @@ import type { ProfileStore, UserProfile } from './store.js'
 export type CommandResult = {
   text: string
   buttons?: Array<{ text: string; url: string }>
+  buttonRows?: Array<Array<{ text: string; url: string }>>
 }
 
 export type CommandContext = {
@@ -97,6 +98,30 @@ function formatStatus(request: PaymentRequest) {
   }
 }
 
+function formatRecentRequests(requests: PaymentRequest[]) {
+  const recent = requests.slice(0, 5)
+  if (!recent.length) {
+    return { text: 'No recent requests found. Create one with /request 10 USDC for design.' }
+  }
+
+  return {
+    text: withFooter([
+      'Recent requests',
+      '',
+      ...recent.flatMap((request, index) => [
+        `${index + 1}. ${request.amount} USDC - ${request.network}`,
+        request.memo,
+        `ID: ${request.id}`,
+        '',
+      ]).slice(0, -1),
+    ]),
+    buttonRows: recent.map((request, index) => [
+      { text: `Pay ${index + 1}`, url: request.payUrl },
+      { text: `Track ${index + 1}`, url: request.dashboardUrl },
+    ]),
+  }
+}
+
 function shortAddress(value: string | undefined) {
   if (!value) return 'not set'
   if (value.length <= 14) return value
@@ -135,6 +160,8 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
         '/request 10 USDC for design work',
         '/request 25 USDC for event ticket net=solana',
         '/me',
+        '/requests',
+        '/status',
         '/status <request-id>',
         '',
         `Current default network: ${userNetwork(profile, config)}`,
@@ -214,15 +241,24 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     })
     requests.set(request.id, request)
     latestRequestByUser.set(context.userId, request.id)
-    await context.store.updateUser(context.userId, { latestRequest: request })
+    await context.store.updateUser(context.userId, {
+      latestRequest: request,
+      recentRequests: [request, ...(profile.recentRequests ?? [])].slice(0, 5),
+    })
     return formatRequest(request)
+  }
+
+  if (trimmed === '/requests') {
+    return formatRecentRequests(profile.recentRequests ?? [])
   }
 
   if (trimmed.startsWith('/status')) {
     const requestedId = trimmed.split(/\s+/)[1]
     const id = requestedId ?? latestRequestByUser.get(context.userId) ?? profile.latestRequest?.id
     if (!id) return { text: 'No recent request found. Create one with /request 10 USDC for design.' }
-    const request = requests.get(id) ?? (profile.latestRequest?.id === id ? profile.latestRequest : undefined)
+    const request = requests.get(id)
+      ?? (profile.latestRequest?.id === id ? profile.latestRequest : undefined)
+      ?? profile.recentRequests?.find(item => item.id === id)
     if (!request) return { text: 'Request not found in this bot session. Open the dashboard link from the original request to track older payments.' }
     return formatStatus(request)
   }

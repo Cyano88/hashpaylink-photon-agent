@@ -45,6 +45,13 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
           url: button.url,
         }))],
       }
+    } else if (result.buttonRows?.length) {
+      body.reply_markup = {
+        inline_keyboard: result.buttonRows.map(row => row.map(button => ({
+          text: button.text,
+          url: button.url,
+        }))),
+      }
     }
     await callTelegram('sendMessage', body)
   }

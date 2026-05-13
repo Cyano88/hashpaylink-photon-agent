@@ -1,19 +1,13 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
+import type { PaymentRequest } from './hashpaylink.js'
 
 export type UserProfile = {
   evmAddress?: string
   solanaAddress?: string
   defaultNetwork?: 'base' | 'arbitrum' | 'solana'
-  latestRequest?: {
-    amount: string
-    memo: string
-    network: 'base' | 'arbitrum' | 'solana'
-    kind: 'collection'
-    payUrl: string
-    dashboardUrl: string
-    id: string
-  }
+  latestRequest?: PaymentRequest
+  recentRequests?: PaymentRequest[]
 }
 
 export type StoreData = {
