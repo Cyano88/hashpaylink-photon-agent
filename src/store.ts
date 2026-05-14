@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import type { PaymentRequest } from './hashpaylink.js'
+import type { AgentRegistration, PaymentRequest, StreamRequest } from './hashpaylink.js'
 
 export type UserProfile = {
   evmAddress?: string
@@ -8,11 +8,14 @@ export type UserProfile = {
   defaultNetwork?: 'base' | 'arbitrum' | 'solana'
   latestRequest?: PaymentRequest
   recentRequests?: PaymentRequest[]
+  recentAiRequests?: PaymentRequest[]
+  recentStreams?: StreamRequest[]
   botMessagesByChat?: Record<string, number[]>
 }
 
 export type StoreData = {
   users: Record<string, UserProfile>
+  agents?: Record<string, AgentRegistration>
 }
 
 const DEFAULT_DATA: StoreData = { users: {} }
@@ -33,6 +36,20 @@ export class ProfileStore {
 
   getUser(userId: string): UserProfile {
     return this.data.users[userId] ?? {}
+  }
+
+  getAgent(slug: string) {
+    return this.data.agents?.[slug]
+  }
+
+  listAgents() {
+    return Object.values(this.data.agents ?? {})
+  }
+
+  async upsertAgent(agent: AgentRegistration) {
+    this.data.agents = { ...(this.data.agents ?? {}), [agent.slug]: agent }
+    await this.save()
+    return agent
   }
 
   async updateUser(userId: string, patch: UserProfile) {

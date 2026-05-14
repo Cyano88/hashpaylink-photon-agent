@@ -1,5 +1,11 @@
 import type { AppConfig, Network } from './config.js'
-import { buildPaymentRequest, type PaymentRequest } from './hashpaylink.js'
+import {
+  buildPaymentRequest,
+  buildStreamRequest,
+  type AgentRegistration,
+  type PaymentRequest,
+  type StreamRequest,
+} from './hashpaylink.js'
 import type { ProfileStore, UserProfile } from './store.js'
 
 export type CommandResult = {
@@ -20,6 +26,9 @@ const latestRequestByUser = new Map<string, string>()
 const FOOTER = 'Built for Photon - Powered by Hash PayLink'
 const MAX_USDC_WHOLE_DIGITS = 12
 const MAX_MEMO_LENGTH = 180
+const MAX_QUESTION_LENGTH = 1_000
+const MAX_AGENT_SLUG_LENGTH = 32
+const REQUEST_TIMEOUT_MS = 12_000
 const NETWORK_HELP = [
   'Supported networks',
   '',
@@ -34,6 +43,33 @@ const NETWORK_HELP = [
   '/request 10 USDC for design net=solana',
 ]
 
+const HELP_LINES = [
+  'Hash PayLink Agent',
+  '',
+  'Instant Payments',
+  '/request 10 USDC for design work',
+  '/status',
+  '/remind',
+  '/requests',
+  '',
+  'AI Paid Access',
+  '/askpaid 1 USDC your question',
+  '/verifyagent name https://agent.example/ask price=2',
+  '/askagent name your question',
+  '/agents',
+  '',
+  'Arc Streaming',
+  '/stream 100 USDC to 0xRecipient for 7d reason="research retainer"',
+  '/streams',
+  '',
+  'Settings',
+  '/setevm 0xYourAddress',
+  '/setsol YourSolanaAddress',
+  '/network solana',
+  '/me',
+  '/clear',
+]
+
 type RequestStats = {
   ok: boolean
   count: number
@@ -41,6 +77,18 @@ type RequestStats = {
   archived: number
   error?: string
 }
+
+type ParsedPaidQuestionArgs =
+  | { amount: string; question: string; network: Network }
+  | { error: string }
+
+type ParsedAgentRegistration =
+  | { slug: string; endpointUrl: string; priceUsdc: string }
+  | { error: string }
+
+type ParsedStreamArgs =
+  | { amount: string; recipient: string; duration: string; reason: string }
+  | { error: string }
 
 function withFooter(lines: string[]) {
   return [...lines, '', FOOTER].join('\n')
@@ -90,6 +138,75 @@ function parseRequestArgs(text: string, fallbackNetwork: Network): ParsedRequest
   return { amount, memo, network }
 }
 
+function parsePaidQuestionArgs(text: string, fallbackNetwork: Network): ParsedPaidQuestionArgs {
+  const parts = text.trim().split(/\s+/)
+  const amount = parseUsdcAmount(parts[1])
+  if (!amount) {
+    return { error: 'Use /askpaid 1 USDC your question. Amounts must use up to 6 decimals.' }
+  }
+
+  let network = fallbackNetwork
+  const networkFlagIndex = parts.findIndex(part => part.startsWith('network=') || part.startsWith('net='))
+  if (networkFlagIndex >= 0) {
+    network = parseNetwork(parts[networkFlagIndex].split('=')[1], fallbackNetwork)
+    parts.splice(networkFlagIndex, 1)
+  }
+
+  const questionStart = parts[2]?.toLowerCase() === 'usdc' ? 3 : 2
+  const question = parts.slice(questionStart).join(' ').trim()
+  if (!question) return { error: 'Add the question after the price. Example: /askpaid 1 USDC What should I build?' }
+  if (question.length > MAX_QUESTION_LENGTH) return { error: `Question is too long. Keep it under ${MAX_QUESTION_LENGTH} characters.` }
+  return { amount, question, network }
+}
+
+function normalizeAgentSlug(value: string | undefined) {
+  const slug = (value ?? '').trim().toLowerCase()
+  if (!/^[a-z0-9][a-z0-9-]{1,31}$/.test(slug)) return undefined
+  return slug.slice(0, MAX_AGENT_SLUG_LENGTH)
+}
+
+function parsePriceFlag(parts: string[]) {
+  const index = parts.findIndex(part => part.startsWith('price='))
+  if (index < 0) return undefined
+  const amount = parseUsdcAmount(parts[index]?.split('=')[1])
+  if (!amount) return undefined
+  parts.splice(index, 1)
+  return amount
+}
+
+function parseAgentRegistrationArgs(text: string): ParsedAgentRegistration {
+  const parts = text.trim().split(/\s+/)
+  const slug = normalizeAgentSlug(parts[1])
+  const endpointUrl = parts[2]?.trim()
+  const priceUsdc = parsePriceFlag(parts) ?? parseUsdcAmount(parts[3])
+  if (!slug || !endpointUrl || !priceUsdc) {
+    return { error: 'Use /verifyagent marketbot https://api.example.com/ask price=2' }
+  }
+  return { slug, endpointUrl, priceUsdc }
+}
+
+function parseStreamArgs(text: string): ParsedStreamArgs {
+  const parts = text.trim().split(/\s+/)
+  const amount = parseUsdcAmount(parts[1])
+  if (!amount) return { error: 'Use /stream 100 USDC to 0xRecipient for 7d reason="research retainer".' }
+
+  const toIndex = parts.findIndex(part => part.toLowerCase() === 'to')
+  const forIndex = parts.findIndex(part => part.toLowerCase() === 'for')
+  if (toIndex < 0 || forIndex < 0 || !parts[toIndex + 1] || !parts[forIndex + 1]) {
+    return { error: 'Use /stream 100 USDC to 0xRecipient for 7d reason="research retainer".' }
+  }
+
+  const recipient = parts[toIndex + 1]
+  if (!isEvmAddress(recipient)) return { error: 'Stream recipient must be an EVM 0x address.' }
+
+  const duration = parts[forIndex + 1].toLowerCase()
+  if (!/^\d+[dhw]$/.test(duration)) return { error: 'Duration must look like 7d, 24h, or 2w.' }
+
+  const reasonMatch = text.match(/\breason=(?:"([^"]+)"|(.+))$/i)
+  const reason = (reasonMatch?.[1] ?? reasonMatch?.[2] ?? 'Arc USDC stream').trim().slice(0, MAX_MEMO_LENGTH)
+  return { amount, recipient, duration, reason }
+}
+
 function formatRequest(request: PaymentRequest) {
   return {
     text: withFooter([
@@ -104,6 +221,13 @@ function formatRequest(request: PaymentRequest) {
 }
 
 function requestButtons(request: PaymentRequest) {
+  return [
+    { text: 'Pay', url: request.payUrl },
+    { text: 'Track', url: request.dashboardUrl },
+  ]
+}
+
+function answerButtons(request: PaymentRequest) {
   return [
     { text: 'Pay', url: request.payUrl },
     { text: 'Track', url: request.dashboardUrl },
@@ -259,6 +383,124 @@ function promptForSolanaRecipient(): CommandResult {
   }
 }
 
+function getRecipientForNetwork(profile: UserProfile, config: AppConfig, network: Network) {
+  return network === 'solana'
+    ? profile.solanaAddress ?? config.defaultSolanaAddress
+    : profile.evmAddress ?? config.defaultEvmAddress
+}
+
+function paidAccessPayerHint(request: PaymentRequest) {
+  return [
+    'After paying, use the payer name you entered on the payment page:',
+    `/answer ${request.id} your-name`,
+  ]
+}
+
+async function fetchWithTimeout(url: string, init?: RequestInit) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+  try {
+    return await fetch(url, { ...init, signal: controller.signal })
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+function isPublicHttpsUrl(raw: string) {
+  try {
+    const url = new URL(raw)
+    const hostname = url.hostname.toLowerCase()
+    if (url.protocol !== 'https:') return false
+    if (hostname === 'localhost' || hostname.endsWith('.local')) return false
+    if (/^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.|0\.|169\.254\.)/.test(hostname)) return false
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function verifyAgentEndpoint(parsed: ParsedAgentRegistration & { error?: never }, userId: string): Promise<AgentRegistration | { error: string }> {
+  if (!isPublicHttpsUrl(parsed.endpointUrl)) {
+    return { error: 'Agent URL must be a public HTTPS endpoint.' }
+  }
+
+  try {
+    const response = await fetchWithTimeout(parsed.endpointUrl, { method: 'GET' })
+    if (response.status >= 500) {
+      return { error: 'Agent endpoint responded with a server error. Fix it and try again.' }
+    }
+  } catch {
+    return { error: 'Agent endpoint did not respond. Make sure the URL is live and try again.' }
+  }
+
+  return {
+    slug: parsed.slug,
+    endpointUrl: parsed.endpointUrl,
+    priceUsdc: parsed.priceUsdc,
+    ownerUserId: userId,
+    status: 'active',
+    createdAt: Date.now(),
+    verifiedAt: Date.now(),
+  }
+}
+
+async function callBuiltInAi(request: PaymentRequest, payer: string, config: AppConfig) {
+  const base = config.hashPayLinkBaseUrl.replace(/\/+$/, '')
+  const response = await fetchWithTimeout(`${base}/api/agent-ask`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      eventId: request.id,
+      payer,
+      question: request.question ?? request.memo,
+    }),
+  })
+  const data = await response.json() as {
+    answer?: string
+    error?: string
+    paymentVerified?: boolean
+    proof?: { ogExplorer?: string; rootHash?: string }
+  }
+  if (!response.ok || !data.paymentVerified) {
+    return { error: data.error ?? 'Payment is not verified on 0G yet. Try again shortly.' }
+  }
+  return { answer: data.answer ?? 'No answer returned.', proof: data.proof }
+}
+
+async function callExternalAgent(agent: AgentRegistration, request: PaymentRequest, payer: string, config: AppConfig) {
+  const base = config.hashPayLinkBaseUrl.replace(/\/+$/, '')
+  const verifyUrl = `${base}/api/agent-verify?eventId=${encodeURIComponent(request.id)}&payer=${encodeURIComponent(payer)}`
+  const verifyResponse = await fetchWithTimeout(verifyUrl)
+  const proof = await verifyResponse.json() as {
+    verified?: boolean
+    error?: string
+    payment?: unknown
+    proof?: unknown
+  }
+  if (!verifyResponse.ok || !proof.verified) {
+    return { error: proof.error ?? 'Payment is not verified on 0G yet. Try again shortly.' }
+  }
+
+  const agentResponse = await fetchWithTimeout(agent.endpointUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      question: request.question,
+      payment: proof.payment,
+      proof: proof.proof,
+      source: 'hashpaylink-photon-agent',
+    }),
+  })
+  const contentType = agentResponse.headers.get('content-type') ?? ''
+  const payload = contentType.includes('application/json')
+    ? await agentResponse.json() as { answer?: string; text?: string; message?: string }
+    : { text: await agentResponse.text() }
+  const answer = payload.answer ?? payload.text ?? payload.message
+
+  if (!agentResponse.ok) return { error: 'Verified payment, but the agent endpoint failed.' }
+  return { answer: (answer || 'Agent returned no answer.').slice(0, 3_500), proof: proof.proof as { ogExplorer?: string; rootHash?: string } | undefined }
+}
+
 function userNetwork(profile: UserProfile, config: AppConfig): Network {
   return profile.defaultNetwork ?? config.defaultNetwork
 }
@@ -291,25 +533,7 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
   if (cmd === '/start' || cmd === '/help') {
     return {
       text: withFooter([
-        'Hash PayLink Agent',
-        '',
-        'Create USDC payment links from chat.',
-        'Requests are multi-payer collections by default.',
-        '',
-        'Commands:',
-        '/setevm 0xYourAddress',
-        '/setsol YourSolanaAddress',
-        '/network solana',
-        '/networks',
-        '/request 10 USDC for design work',
-        '/request 25 USDC for event ticket net=solana',
-        '/me',
-        '/requests',
-        '/status',
-        '/status <request-id>',
-        '/remind',
-        '/remind <request-id>',
-        '/clear',
+        ...HELP_LINES,
         '',
         `Current default network: ${userNetwork(profile, config)}`,
       ]),
@@ -362,6 +586,9 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
         `EVM: ${shortAddress(profile.evmAddress)}`,
         `Solana: ${shortAddress(profile.solanaAddress)}`,
         `Default network: ${userNetwork(profile, config)}`,
+        `Recent requests: ${profile.recentRequests?.length ?? 0}`,
+        `AI access requests: ${profile.recentAiRequests?.length ?? 0}`,
+        `Recent streams: ${profile.recentStreams?.length ?? 0}`,
       ]),
     }
   }
@@ -395,6 +622,228 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
       recentRequests: [request, ...(profile.recentRequests ?? [])].slice(0, 5),
     })
     return formatRequest(request)
+  }
+
+  if (cmd === '/askpaid') {
+    const parsed = parsePaidQuestionArgs(trimmed, userNetwork(profile, config))
+    if ('error' in parsed) return { text: parsed.error }
+
+    const recipient = getRecipientForNetwork(profile, config, parsed.network)
+    if (!recipient) return parsed.network === 'solana' ? promptForSolanaRecipient() : promptForEvmRecipient()
+
+    const request = buildPaymentRequest({
+      baseUrl: config.hashPayLinkBaseUrl,
+      amount: parsed.amount,
+      memo: 'Hash PayLink Circle/Arc AI access',
+      network: parsed.network,
+      evmAddress: parsed.network === 'solana' ? profile.evmAddress ?? config.defaultEvmAddress : recipient,
+      solanaAddress: parsed.network === 'solana' ? recipient : profile.solanaAddress ?? config.defaultSolanaAddress,
+      returnUrl: config.telegramReturnUrl,
+      kind: 'ai_access',
+      question: parsed.question,
+    })
+    requests.set(request.id, request)
+    latestRequestByUser.set(context.userId, request.id)
+    await context.store.updateUser(context.userId, {
+      latestRequest: request,
+      recentAiRequests: [request, ...(profile.recentAiRequests ?? [])].slice(0, 5),
+      recentRequests: [request, ...(profile.recentRequests ?? [])].slice(0, 5),
+    })
+
+    return {
+      text: withFooter([
+        'Paid AI Access created',
+        '',
+        `Price: ${request.amount} USDC`,
+        `Network: ${request.network}`,
+        'Agent: Hash PayLink Circle/Arc Strategy AI',
+        '',
+        'Question:',
+        parsed.question,
+        '',
+        'Pay to unlock the answer.',
+        ...paidAccessPayerHint(request),
+      ]),
+      buttons: answerButtons(request),
+    }
+  }
+
+  if (cmd === '/answer') {
+    const [, requestedId, payer] = trimmed.split(/\s+/, 3)
+    if (!requestedId || !payer) return { text: 'Use /answer <request-id> <payer-name>.' }
+    const request = findRequest(requestedId, profile)
+    if (!request) return { text: 'Paid access request not found. Use /requests to see recent requests.' }
+    if (request.kind === 'agent_access') {
+      const agent = request.agentSlug ? context.store.getAgent(request.agentSlug) : undefined
+      if (!agent || agent.status !== 'active') return { text: 'Agent is no longer active on Hash PayLink.' }
+      const result = await callExternalAgent(agent, request, payer, config)
+      if ('error' in result) return { text: result.error ?? 'Agent access failed.' }
+      return {
+        text: withFooter([
+          `Payment verified on 0G.`,
+          `Agent: ${agent.slug}`,
+          '',
+          'Answer:',
+          result.answer ?? '',
+          '',
+          result.proof?.ogExplorer ? `Proof: ${result.proof.ogExplorer}` : 'Proof: 0G verification returned',
+        ]),
+      }
+    }
+
+    const result = await callBuiltInAi(request, payer, config)
+    if ('error' in result) return { text: result.error ?? 'AI access failed.' }
+    return {
+      text: withFooter([
+        'Payment verified on 0G.',
+        'Agent: Hash PayLink Circle/Arc Strategy AI',
+        '',
+        'Answer:',
+        result.answer ?? '',
+        '',
+        result.proof?.ogExplorer ? `Proof: ${result.proof.ogExplorer}` : 'Proof: 0G verification returned',
+      ]),
+    }
+  }
+
+  if (cmd === '/verifyagent') {
+    const parsed = parseAgentRegistrationArgs(trimmed)
+    if ('error' in parsed) return { text: parsed.error }
+    const existing = context.store.getAgent(parsed.slug)
+    if (existing && existing.ownerUserId !== context.userId) {
+      return { text: `Agent name "${parsed.slug}" is already registered.` }
+    }
+
+    const verified = await verifyAgentEndpoint(parsed, context.userId)
+    if ('error' in verified) return { text: verified.error }
+    await context.store.upsertAgent(verified)
+    return {
+      text: withFooter([
+        'Agent verified on Hash PayLink.',
+        '',
+        `Name: ${verified.slug}`,
+        `Price: ${verified.priceUsdc} USDC`,
+        `Endpoint: ${verified.endpointUrl}`,
+        '',
+        `Users can now call:`,
+        `/askagent ${verified.slug} your question`,
+      ]),
+    }
+  }
+
+  if (cmd === '/agents') {
+    const agents = context.store.listAgents().filter(agent => agent.status === 'active').slice(0, 10)
+    if (!agents.length) return { text: 'No verified Hash PayLink agents yet.' }
+    return {
+      text: withFooter([
+        'Verified Hash PayLink agents',
+        '',
+        ...agents.flatMap(agent => [
+          `${agent.slug} - ${agent.priceUsdc} USDC`,
+          `/askagent ${agent.slug} your question`,
+          '',
+        ]).slice(0, -1),
+      ]),
+    }
+  }
+
+  if (cmd === '/askagent') {
+    const parts = trimmed.split(/\s+/)
+    const slug = normalizeAgentSlug(parts[1])
+    if (!slug) return { text: 'Use /askagent agent-name your question.' }
+    const agent = context.store.getAgent(slug)
+    if (!agent) return { text: `Agent "${slug}" is not registered on Hash PayLink.` }
+    if (agent.status !== 'active') return { text: `Agent "${slug}" is not active.` }
+    const question = parts.slice(2).join(' ').trim()
+    if (!question) return { text: `Ask a question after the agent name. Example: /askagent ${slug} Analyze BTC risk.` }
+    if (question.length > MAX_QUESTION_LENGTH) return { text: `Question is too long. Keep it under ${MAX_QUESTION_LENGTH} characters.` }
+
+    const network = userNetwork(profile, config)
+    const recipient = getRecipientForNetwork(profile, config, network)
+    if (!recipient) return network === 'solana' ? promptForSolanaRecipient() : promptForEvmRecipient()
+    const request = buildPaymentRequest({
+      baseUrl: config.hashPayLinkBaseUrl,
+      amount: agent.priceUsdc,
+      memo: `Agent access: ${agent.slug}`,
+      network,
+      evmAddress: network === 'solana' ? profile.evmAddress ?? config.defaultEvmAddress : recipient,
+      solanaAddress: network === 'solana' ? recipient : profile.solanaAddress ?? config.defaultSolanaAddress,
+      returnUrl: config.telegramReturnUrl,
+      kind: 'agent_access',
+      question,
+      agentSlug: agent.slug,
+    })
+    requests.set(request.id, request)
+    latestRequestByUser.set(context.userId, request.id)
+    await context.store.updateUser(context.userId, {
+      latestRequest: request,
+      recentAiRequests: [request, ...(profile.recentAiRequests ?? [])].slice(0, 5),
+      recentRequests: [request, ...(profile.recentRequests ?? [])].slice(0, 5),
+    })
+
+    return {
+      text: withFooter([
+        `Verified Hash PayLink agent: ${agent.slug}`,
+        '',
+        `Price: ${agent.priceUsdc} USDC`,
+        `Network: ${network}`,
+        '',
+        'Payment required before access.',
+        'Proceed to payment.',
+        '',
+        ...paidAccessPayerHint(request),
+      ]),
+      buttons: answerButtons(request),
+    }
+  }
+
+  if (cmd === '/stream') {
+    const parsed = parseStreamArgs(trimmed)
+    if ('error' in parsed) return { text: parsed.error }
+    const stream = buildStreamRequest({
+      baseUrl: config.hashPayLinkBaseUrl,
+      amount: parsed.amount,
+      recipient: parsed.recipient,
+      duration: parsed.duration,
+      reason: parsed.reason,
+    })
+    await context.store.updateUser(context.userId, {
+      recentStreams: [stream, ...(profile.recentStreams ?? [])].slice(0, 5),
+    })
+    return {
+      text: withFooter([
+        'Arc StreamPay link created',
+        '',
+        `${stream.amount} USDC`,
+        `Recipient: ${shortAddress(stream.recipient)}`,
+        `Duration: ${stream.duration}`,
+        `Reason: ${stream.reason}`,
+        '',
+        'Open StreamPay to fund and deploy the Arc USDC stream.',
+      ]),
+      buttons: [{ text: 'Open StreamPay', url: stream.streamUrl }],
+    }
+  }
+
+  if (cmd === '/streams') {
+    const streams = profile.recentStreams ?? []
+    if (!streams.length) return { text: 'No recent streams found. Create one with /stream 100 USDC to 0xRecipient for 7d.' }
+    return {
+      text: withFooter([
+        'Recent Arc streams',
+        '',
+        ...streams.flatMap((stream: StreamRequest, index: number) => [
+          `${index + 1}. ${stream.amount} USDC for ${stream.duration}`,
+          stream.reason,
+          `Recipient: ${shortAddress(stream.recipient)}`,
+          `ID: ${stream.id}`,
+          '',
+        ]).slice(0, -1),
+      ]),
+      buttonRows: streams.map((stream, index) => [
+        { text: `Open ${index + 1}`, url: stream.streamUrl },
+      ]),
+    }
   }
 
   if (cmd === '/requests') {

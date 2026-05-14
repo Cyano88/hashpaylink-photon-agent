@@ -4,10 +4,12 @@ export type PaymentRequest = {
   amount: string
   memo: string
   network: Network
-  kind: 'collection'
+  kind: 'collection' | 'ai_access' | 'agent_access'
   payUrl: string
   dashboardUrl: string
   id: string
+  question?: string
+  agentSlug?: string
 }
 
 type BuildInput = {
@@ -18,6 +20,29 @@ type BuildInput = {
   evmAddress: string
   solanaAddress: string
   returnUrl?: string
+  kind?: PaymentRequest['kind']
+  question?: string
+  agentSlug?: string
+}
+
+export type AgentRegistration = {
+  slug: string
+  endpointUrl: string
+  priceUsdc: string
+  ownerUserId: string
+  status: 'active' | 'disabled'
+  createdAt: number
+  verifiedAt?: number
+}
+
+export type StreamRequest = {
+  id: string
+  amount: string
+  recipient: string
+  duration: string
+  reason: string
+  streamUrl: string
+  createdAt: number
 }
 
 export function createRequestId() {
@@ -45,9 +70,41 @@ export function buildPaymentRequest(input: BuildInput): PaymentRequest {
     amount: input.amount,
     memo: input.memo,
     network: input.network,
-    kind: 'collection',
+    kind: input.kind ?? 'collection',
     id,
+    question: input.question,
+    agentSlug: input.agentSlug,
     payUrl: `${base}/pay?${params.toString()}`,
     dashboardUrl: `${base}/dashboard?${params.toString()}`,
+  }
+}
+
+export function buildStreamRequest(input: {
+  baseUrl: string
+  amount: string
+  recipient: string
+  duration: string
+  reason: string
+}): StreamRequest {
+  const id = createRequestId()
+  const base = input.baseUrl.replace(/\/+$/, '')
+  const params = new URLSearchParams()
+  params.set('app', 'streampay')
+  params.set('amount', input.amount)
+  params.set('recipient', input.recipient)
+  params.set('duration', input.duration)
+  params.set('reason', input.reason)
+  params.set('src', 'telegram')
+  params.set('wallet', 'circle')
+  params.set('id', id)
+
+  return {
+    id,
+    amount: input.amount,
+    recipient: input.recipient,
+    duration: input.duration,
+    reason: input.reason,
+    streamUrl: `${base}/?${params.toString()}`,
+    createdAt: Date.now(),
   }
 }
