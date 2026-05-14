@@ -30,17 +30,16 @@ export function buildPaymentRequest(input: BuildInput): PaymentRequest {
   const params = new URLSearchParams()
 
   params.set('id', id)
-  params.set('amt', input.amount)
-  params.set('memo', input.memo)
-  params.set('net', input.network)
-  params.set('mode', 'wallet')
-  params.set('multi', '1')
-  params.set('event', '1')
-  params.set('source', 'telegram')
-  if (input.returnUrl) params.set('return', input.returnUrl)
+  params.set('a', input.amount)
+  params.set('m', input.memo)
+  params.set('n', input.network)
+  params.set('x', '1')
+  params.set('v', '1')
+  params.set('src', 't')
+  if (input.returnUrl) params.set('r', input.returnUrl)
 
-  if (input.evmAddress) params.set('evm', input.evmAddress)
-  if (input.solanaAddress) params.set('sol', input.solanaAddress)
+  if (input.evmAddress) params.set('e', input.evmAddress)
+  if (input.solanaAddress) params.set('s', input.solanaAddress)
 
   return {
     amount: input.amount,
