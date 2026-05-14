@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import type { AgentRegistration, PaymentRequest, StreamRequest } from './hashpaylink.js'
+import type { AgentRegistration, PaymentRequest, PendingStreamRequest, StreamRequest } from './hashpaylink.js'
 
 export type UserProfile = {
   evmAddress?: string
@@ -10,6 +10,7 @@ export type UserProfile = {
   recentRequests?: PaymentRequest[]
   recentAiRequests?: PaymentRequest[]
   recentStreams?: StreamRequest[]
+  pendingStreams?: PendingStreamRequest[]
   botMessagesByChat?: Record<string, number[]>
 }
 

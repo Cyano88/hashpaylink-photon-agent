@@ -1,8 +1,10 @@
 import type { AppConfig, Network } from './config.js'
 import {
   buildPaymentRequest,
+  buildPendingStreamRequest,
   buildStreamRequest,
   type AgentRegistration,
+  type PendingStreamRequest,
   type PaymentRequest,
   type StreamRequest,
 } from './hashpaylink.js'
@@ -60,6 +62,8 @@ const HELP_LINES = [
   '',
   'Arc Streaming',
   '/stream 100 USDC to 0xRecipient for 7d reason="research retainer"',
+  '/stream 100 USDC to recipient@email.com for 7d',
+  '/streamready <pending-id>',
   '/streams',
   '',
   'Settings',
@@ -87,7 +91,12 @@ type ParsedAgentRegistration =
   | { error: string }
 
 type ParsedStreamArgs =
-  | { amount: string; recipient: string; duration: string; reason: string }
+  | { amount: string; recipient: string; recipientKind: 'address' | 'email'; duration: string; reason: string }
+  | { error: string }
+
+type ResolvedCircleRecipientWallet =
+  | { found: true; walletAddress: string }
+  | { found: false }
   | { error: string }
 
 function withFooter(lines: string[]) {
@@ -197,14 +206,15 @@ function parseStreamArgs(text: string): ParsedStreamArgs {
   }
 
   const recipient = parts[toIndex + 1]
-  if (!isEvmAddress(recipient)) return { error: 'Stream recipient must be an EVM 0x address.' }
+  const recipientKind = isEvmAddress(recipient) ? 'address' : isEmail(recipient) ? 'email' : undefined
+  if (!recipientKind) return { error: 'Stream recipient must be an EVM 0x address or recipient@email.com.' }
 
   const duration = parts[forIndex + 1].toLowerCase()
   if (!/^\d+[dhw]$/.test(duration)) return { error: 'Duration must look like 7d, 24h, or 2w.' }
 
   const reasonMatch = text.match(/\breason=(?:"([^"]+)"|(.+))$/i)
   const reason = (reasonMatch?.[1] ?? reasonMatch?.[2] ?? 'Arc USDC stream').trim().slice(0, MAX_MEMO_LENGTH)
-  return { amount, recipient, duration, reason }
+  return { amount, recipient: recipient.toLowerCase(), recipientKind, duration, reason }
 }
 
 function formatRequest(request: PaymentRequest) {
@@ -350,6 +360,10 @@ function shortAddress(value: string | undefined) {
 
 function isEvmAddress(value: string) {
   return /^0x[a-fA-F0-9]{40}$/.test(value)
+}
+
+function isEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim().toLowerCase())
 }
 
 function isLikelySolanaAddress(value: string) {
@@ -510,6 +524,21 @@ function findRequest(id: string | undefined, profile: UserProfile) {
   return requests.get(id)
     ?? (profile.latestRequest?.id === id ? profile.latestRequest : undefined)
     ?? profile.recentRequests?.find(item => item.id === id)
+}
+
+function findPendingStream(id: string | undefined, profile: UserProfile) {
+  if (!id) return undefined
+  return profile.pendingStreams?.find(stream => stream.id === id)
+}
+
+async function resolveCircleRecipientWallet(baseUrl: string, recipientEmail: string): Promise<ResolvedCircleRecipientWallet> {
+  const base = baseUrl.replace(/\/+$/, '')
+  const response = await fetchWithTimeout(`${base}/api/circle-recipient-wallet?email=${encodeURIComponent(recipientEmail)}`)
+  const data = await response.json() as { ok?: boolean; found?: boolean; walletAddress?: string; error?: string }
+  if (!response.ok || !data.ok) return { error: data.error ?? 'Could not resolve Circle recipient wallet.' }
+  if (!data.found || !data.walletAddress) return { found: false }
+  if (!isEvmAddress(data.walletAddress)) return { error: 'Resolved Circle wallet address is invalid.' }
+  return { found: true, walletAddress: data.walletAddress }
 }
 
 export async function handleCommand(text: string, config: AppConfig, context: CommandContext): Promise<CommandResult> {
@@ -800,6 +829,64 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
   if (cmd === '/stream') {
     const parsed = parseStreamArgs(trimmed)
     if ('error' in parsed) return { text: parsed.error }
+
+    if (parsed.recipientKind === 'email') {
+      const resolved = await resolveCircleRecipientWallet(config.hashPayLinkBaseUrl, parsed.recipient)
+      if ('error' in resolved) return { text: resolved.error }
+      if (!resolved.found) {
+        const pending = buildPendingStreamRequest({
+          baseUrl: config.hashPayLinkBaseUrl,
+          amount: parsed.amount,
+          recipientEmail: parsed.recipient,
+          duration: parsed.duration,
+          reason: parsed.reason,
+        })
+        await context.store.updateUser(context.userId, {
+          pendingStreams: [pending, ...(profile.pendingStreams ?? [])].slice(0, 5),
+        })
+        return {
+          text: withFooter([
+            'Recipient Circle wallet setup required',
+            '',
+            `${pending.amount} USDC`,
+            `Recipient: ${pending.recipientEmail}`,
+            `Duration: ${pending.duration}`,
+            `Reason: ${pending.reason}`,
+            '',
+            'Share the setup link with the recipient.',
+            'After they prepare their Circle Smart Wallet, run:',
+            `/streamready ${pending.id}`,
+          ]),
+          buttons: [{ text: 'Prepare Recipient Wallet', url: pending.prepareUrl }],
+        }
+      }
+
+      const stream = buildStreamRequest({
+        baseUrl: config.hashPayLinkBaseUrl,
+        amount: parsed.amount,
+        recipient: resolved.walletAddress,
+        duration: parsed.duration,
+        reason: parsed.reason,
+      })
+      await context.store.updateUser(context.userId, {
+        recentStreams: [stream, ...(profile.recentStreams ?? [])].slice(0, 5),
+      })
+      return {
+        text: withFooter([
+          'Arc StreamPay link created',
+          '',
+          `${stream.amount} USDC`,
+          `Recipient email: ${parsed.recipient}`,
+          `Circle wallet: ${shortAddress(stream.recipient)}`,
+          `Duration: ${stream.duration}`,
+          `Reason: ${stream.reason}`,
+          '',
+          'Open StreamPay to fund and deploy the Arc USDC stream.',
+        ]),
+        buttons: [{ text: 'Open StreamPay', url: stream.streamUrl }],
+      }
+    }
+
     const stream = buildStreamRequest({
       baseUrl: config.hashPayLinkBaseUrl,
       amount: parsed.amount,
@@ -825,9 +912,56 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     }
   }
 
+  if (cmd === '/streamready') {
+    const pendingId = trimmed.split(/\s+/)[1]
+    const pending = findPendingStream(pendingId, profile)
+    if (!pending) return { text: 'Pending stream not found. Use /streams to see recent pending streams.' }
+    const resolved = await resolveCircleRecipientWallet(config.hashPayLinkBaseUrl, pending.recipientEmail)
+    if ('error' in resolved) return { text: resolved.error }
+    if (!resolved.found) {
+      return {
+        text: withFooter([
+          'Recipient wallet is not ready yet.',
+          '',
+          `Recipient: ${pending.recipientEmail}`,
+          '',
+          'Ask the recipient to open the setup link and prepare their Circle Smart Wallet.',
+        ]),
+        buttons: [{ text: 'Prepare Recipient Wallet', url: pending.prepareUrl }],
+      }
+    }
+
+    const stream = buildStreamRequest({
+      baseUrl: config.hashPayLinkBaseUrl,
+      amount: pending.amount,
+      recipient: resolved.walletAddress,
+      duration: pending.duration,
+      reason: pending.reason,
+    })
+    await context.store.updateUser(context.userId, {
+      recentStreams: [stream, ...(profile.recentStreams ?? [])].slice(0, 5),
+      pendingStreams: (profile.pendingStreams ?? []).filter(item => item.id !== pending.id),
+    })
+    return {
+      text: withFooter([
+        'Recipient Circle wallet resolved',
+        '',
+        `${stream.amount} USDC`,
+        `Recipient email: ${pending.recipientEmail}`,
+        `Circle wallet: ${shortAddress(stream.recipient)}`,
+        `Duration: ${stream.duration}`,
+        `Reason: ${stream.reason}`,
+        '',
+        'Open StreamPay to fund and deploy the Arc USDC stream.',
+      ]),
+      buttons: [{ text: 'Open StreamPay', url: stream.streamUrl }],
+    }
+  }
+
   if (cmd === '/streams') {
     const streams = profile.recentStreams ?? []
-    if (!streams.length) return { text: 'No recent streams found. Create one with /stream 100 USDC to 0xRecipient for 7d.' }
+    const pending = profile.pendingStreams ?? []
+    if (!streams.length && !pending.length) return { text: 'No recent streams found. Create one with /stream 100 USDC to 0xRecipient for 7d.' }
     return {
       text: withFooter([
         'Recent Arc streams',
@@ -838,11 +972,25 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
           `Recipient: ${shortAddress(stream.recipient)}`,
           `ID: ${stream.id}`,
           '',
-        ]).slice(0, -1),
-      ]),
-      buttonRows: streams.map((stream, index) => [
-        { text: `Open ${index + 1}`, url: stream.streamUrl },
-      ]),
+        ]),
+        pending.length ? 'Pending recipient wallets' : '',
+        ...pending.flatMap((stream: PendingStreamRequest, index: number) => [
+          `${index + 1}. ${stream.amount} USDC for ${stream.duration}`,
+          stream.reason,
+          `Recipient: ${stream.recipientEmail}`,
+          `Ready check: /streamready ${stream.id}`,
+          '',
+        ]),
+      ].filter(Boolean).slice(0, -1),
+      ),
+      buttonRows: [
+        ...streams.map((stream, index) => [
+          { text: `Open ${index + 1}`, url: stream.streamUrl },
+        ]),
+        ...pending.map((stream, index) => [
+          { text: `Prepare ${index + 1}`, url: stream.prepareUrl },
+        ]),
+      ],
     }
   }
 

@@ -45,6 +45,16 @@ export type StreamRequest = {
   createdAt: number
 }
 
+export type PendingStreamRequest = {
+  id: string
+  amount: string
+  recipientEmail: string
+  duration: string
+  reason: string
+  prepareUrl: string
+  createdAt: number
+}
+
 export function createRequestId() {
   return crypto.randomUUID().replaceAll('-', '').slice(0, 24)
 }
@@ -105,6 +115,40 @@ export function buildStreamRequest(input: {
     duration: input.duration,
     reason: input.reason,
     streamUrl: `${base}/?${params.toString()}`,
+    createdAt: Date.now(),
+  }
+}
+
+export function buildRecipientPrepareUrl(input: {
+  baseUrl: string
+  recipientEmail: string
+  pendingId?: string
+}) {
+  const base = input.baseUrl.replace(/\/+$/, '')
+  const params = new URLSearchParams()
+  params.set('app', 'streampay')
+  params.set('src', 'telegram')
+  params.set('wallet', 'circle')
+  params.set('email', input.recipientEmail)
+  if (input.pendingId) params.set('pending', input.pendingId)
+  return `${base}/recipient?${params.toString()}`
+}
+
+export function buildPendingStreamRequest(input: {
+  baseUrl: string
+  amount: string
+  recipientEmail: string
+  duration: string
+  reason: string
+}): PendingStreamRequest {
+  const id = createRequestId()
+  return {
+    id,
+    amount: input.amount,
+    recipientEmail: input.recipientEmail,
+    duration: input.duration,
+    reason: input.reason,
+    prepareUrl: buildRecipientPrepareUrl({ ...input, pendingId: id }),
     createdAt: Date.now(),
   }
 }
