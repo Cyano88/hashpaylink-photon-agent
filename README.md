@@ -43,6 +43,10 @@ Send `/setevm` or `/setsol` without an address to open a reply prompt. Then past
 
 Use `/request` for normal one-time Hash PayLink collections. Payments are tracked through the Hash PayLink dashboard and archived to 0G when the main backend records the payment.
 
+**WhatsApp Payments**
+
+WhatsApp is intentionally limited to one-time Hash PayLink payment requests and tracking. It supports `/request`, `/requests`, `/status`, `/remind`, and `/help`; AI access, agent registration, and StreamPay stay Telegram-only for now.
+
 **AI Paid Access**
 
 Use `/askpaid` to create a payment-gated question for the built-in Hash PayLink Circle/Arc Strategy AI endpoint. After the payer completes the PayLink, run `/answer <request-id> <payer-name>` using the payer name entered on the payment page. The bot verifies payment through Hash PayLink's 0G proof endpoint before returning the answer.
@@ -59,6 +63,7 @@ Copy `.env.example` to `.env` and fill:
 
 ```env
 HASH_PAYLINK_BASE_URL=https://hashpaylink.com
+TELEGRAM_ENABLED=true
 TELEGRAM_BOT_TOKEN=
 PHOTON_PROJECT_ID=
 PHOTON_SECRET_KEY=
@@ -66,6 +71,15 @@ DEFAULT_EVM_ADDRESS=
 DEFAULT_SOLANA_ADDRESS=
 DEFAULT_NETWORK=base
 STORE_PATH=./data/profiles.json
+
+# Optional WhatsApp Business Cloud API transport.
+WHATSAPP_ENABLED=false
+WHATSAPP_ACCESS_TOKEN=
+WHATSAPP_PHONE_NUMBER_ID=
+WHATSAPP_APP_SECRET=
+WHATSAPP_VERIFY_TOKEN=
+WHATSAPP_GRAPH_VERSION=v20.0
+PORT=3000
 ```
 
 `DEFAULT_EVM_ADDRESS` and `DEFAULT_SOLANA_ADDRESS` are optional fallback addresses. Public users should save their own recipient addresses in Telegram:
@@ -76,6 +90,14 @@ STORE_PATH=./data/profiles.json
 ```
 
 Use public recipient addresses only. Never store private keys in this agent.
+
+For WhatsApp setup, create a Meta Developer app with WhatsApp Business enabled, then point the WhatsApp webhook to:
+
+```text
+https://YOUR_AGENT_HOST/webhook/whatsapp
+```
+
+Use the same value from `WHATSAPP_VERIFY_TOKEN` when Meta asks for the webhook verify token. WhatsApp payment requests rely on `DEFAULT_EVM_ADDRESS` or `DEFAULT_SOLANA_ADDRESS` because wallet setup commands remain Telegram-only.
 
 ## Run Locally
 
@@ -112,6 +134,11 @@ Telegram chat
   -> Hash PayLink Multi-Payer Collection / AI access / Arc StreamPay URL
   -> payer completes payment or stream setup on hashpaylink.com
   -> 0G proof verification for paid AI access
+
+WhatsApp chat
+  -> Hash PayLink Photon Agent
+  -> Hash PayLink Multi-Payer Collection URL only
+  -> payer completes payment on hashpaylink.com
 ```
 
 No custody. No private keys. No payment execution inside Telegram.

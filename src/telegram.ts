@@ -26,6 +26,15 @@ type TelegramMessage = {
 }
 
 export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
+  if (!config.telegramEnabled) {
+    console.log('Telegram polling disabled.')
+    return
+  }
+  if (!config.telegramBotToken) {
+    console.warn('Telegram polling disabled: missing TELEGRAM_BOT_TOKEN.')
+    return
+  }
+
   let offset = 0
   const apiBase = `https://api.telegram.org/bot${config.telegramBotToken}`
 
