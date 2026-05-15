@@ -15,7 +15,8 @@ Bot replies include the footer `Built for Photon - Powered by Hash PayLink` to k
 /setsol YourSolanaAddress
 /network base
 /request 10 USDC for design work
-/request 25 USDC for event ticket net=solana
+/request 25 USDC for event ticket on solana
+/request 25 USDC for invoice on arbitrum
 /askpaid 1 USDC What should I build for the 0G hackathon?
 /answer <request-id> <payer-name>
 /verifyagent marketbot https://api.marketbot.xyz/ask price=2
@@ -42,6 +43,8 @@ Send `/setevm` or `/setsol` without an address to open a reply prompt. Then past
 **Instant Payments**
 
 Use `/request` for normal one-time Hash PayLink collections. Payments are tracked through the Hash PayLink dashboard and archived to 0G when the main backend records the payment.
+
+Base is the default network. Add `on solana` or `on arbitrum` to route a single request to that chain, for example `/request 4 USDC for relayer on solana`. Legacy `net=solana` / `net=arbitrum` overrides still work.
 
 **WhatsApp Payments**
 

@@ -42,7 +42,8 @@ const NETWORK_HELP = [
   '/network solana',
   '',
   'Override once:',
-  '/request 10 USDC for design net=solana',
+  '/request 10 USDC for design on solana',
+  '/request 10 USDC for design on arbitrum',
 ]
 
 const HELP_LINES = [
@@ -104,9 +105,37 @@ function withFooter(lines: string[]) {
 }
 
 function parseNetwork(raw: string | undefined, fallback: Network): Network {
-  const value = (raw ?? '').toLowerCase()
-  if (value === 'base' || value === 'arbitrum' || value === 'solana') return value
+  const value = normalizeNetworkName(raw)
+  if (value) return value
   return fallback
+}
+
+function normalizeNetworkName(raw: string | undefined): Network | undefined {
+  const value = (raw ?? '').trim().toLowerCase()
+  if (value === 'base' || value === 'base-mainnet') return 'base'
+  if (value === 'arbitrum' || value === 'arb' || value === 'arbitrum-one') return 'arbitrum'
+  if (value === 'solana' || value === 'sol') return 'solana'
+  return undefined
+}
+
+function extractNetworkOverride(parts: string[], fallbackNetwork: Network): Network {
+  let network = fallbackNetwork
+  const networkFlagIndex = parts.findIndex(part => part.startsWith('network=') || part.startsWith('net='))
+  if (networkFlagIndex >= 0) {
+    network = parseNetwork(parts[networkFlagIndex].split('=')[1], fallbackNetwork)
+    parts.splice(networkFlagIndex, 1)
+  }
+
+  for (let index = parts.length - 2; index >= 0; index -= 1) {
+    if (parts[index]?.toLowerCase() !== 'on') continue
+    const parsed = normalizeNetworkName(parts[index + 1])
+    if (!parsed) continue
+    network = parsed
+    parts.splice(index, 2)
+    break
+  }
+
+  return network
 }
 
 type ParsedRequestArgs =
@@ -132,12 +161,7 @@ function parseRequestArgs(text: string, fallbackNetwork: Network): ParsedRequest
     return { error: 'Use /request 10 USDC for design work. Amounts must use up to 6 decimals.' }
   }
 
-  let network = fallbackNetwork
-  const networkFlagIndex = parts.findIndex(part => part.startsWith('network=') || part.startsWith('net='))
-  if (networkFlagIndex >= 0) {
-    network = parseNetwork(parts[networkFlagIndex].split('=')[1], fallbackNetwork)
-    parts.splice(networkFlagIndex, 1)
-  }
+  const network = extractNetworkOverride(parts, fallbackNetwork)
 
   const memoStart = parts[2]?.toLowerCase() === 'usdc' ? 3 : 2
   const memo = parts.slice(memoStart).join(' ').replace(/^for\s+/i, '').trim() || 'Payment request'
@@ -154,12 +178,7 @@ function parsePaidQuestionArgs(text: string, fallbackNetwork: Network): ParsedPa
     return { error: 'Use /askpaid 1 USDC your question. Amounts must use up to 6 decimals.' }
   }
 
-  let network = fallbackNetwork
-  const networkFlagIndex = parts.findIndex(part => part.startsWith('network=') || part.startsWith('net='))
-  if (networkFlagIndex >= 0) {
-    network = parseNetwork(parts[networkFlagIndex].split('=')[1], fallbackNetwork)
-    parts.splice(networkFlagIndex, 1)
-  }
+  const network = extractNetworkOverride(parts, fallbackNetwork)
 
   const questionStart = parts[2]?.toLowerCase() === 'usdc' ? 3 : 2
   const question = parts.slice(questionStart).join(' ').trim()
@@ -600,7 +619,7 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     }
     const nextNetwork = parseNetwork(rawNetwork, userNetwork(profile, config))
     await context.store.updateUser(context.userId, { defaultNetwork: nextNetwork })
-    return { text: withFooter([`Default network saved: ${nextNetwork}`, '', 'Future /request commands will use this network unless you pass net=...']) }
+    return { text: withFooter([`Default network saved: ${nextNetwork}`, '', 'Future /request commands will use this network unless you add on solana or on arbitrum.']) }
   }
 
   if (cmd === '/networks') {
