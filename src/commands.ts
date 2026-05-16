@@ -55,6 +55,16 @@ const HELP_LINES = [
   '/remind',
   '/requests',
   '',
+  'Polymarket Funding',
+  '/setpoly 0xYourPolymarketWallet',
+  '/fundpoly 25 from base',
+  '/poly',
+  '',
+  'Polymarket LP Scout',
+  '/lp best',
+  '/lp crypto',
+  '/lpmarket polymarket-url-or-slug',
+  '',
   'AI Paid Access',
   '/askpaid your question',
   '/verifyagent name https://agent.example/ask price=2',
@@ -103,6 +113,63 @@ type ResolvedCircleRecipientWallet =
   | { found: true; walletAddress: string }
   | { found: false }
   | { error: string }
+
+type PolymarketDepositAddresses = NonNullable<UserProfile['polymarketDepositAddresses']>
+
+type PolymarketPosition = {
+  title?: string
+  outcome?: string
+  size?: number
+  currentValue?: number
+  cashPnl?: number
+  percentPnl?: number
+  curPrice?: number
+}
+
+type PolymarketValueResponse = {
+  value?: number
+  total?: number
+  totalValue?: number
+  currentValue?: number
+}
+
+type PolymarketRewardMarket = Record<string, unknown>
+
+type PolymarketBookLevel = {
+  price?: string | number
+  size?: string | number
+}
+
+type PolymarketBookResponse = {
+  bids?: PolymarketBookLevel[]
+  asks?: PolymarketBookLevel[]
+}
+
+type PolymarketBookSummary = {
+  bestBid?: number
+  bestAsk?: number
+  midpoint?: number
+  spread?: number
+}
+
+type PolymarketLpOpportunity = {
+  title: string
+  slug?: string
+  tokenId?: string
+  dailyReward?: number
+  maxSpread?: number
+  minSize?: number
+  liquidity?: number
+  bestBid?: number
+  bestAsk?: number
+  midpoint?: number
+  spread?: number
+  suggestedYesBid?: number
+  suggestedNoBid?: number
+  eligible?: boolean
+  risk: 'low' | 'medium' | 'high'
+  score: number
+}
 
 function withFooter(lines: string[]) {
   return [...lines, '', FOOTER].join('\n')
@@ -173,6 +240,20 @@ function parseRequestArgs(text: string, fallbackNetwork: Network): ParsedRequest
     return { error: `Memo is too long. Keep it under ${MAX_MEMO_LENGTH} characters.` }
   }
   return { amount, memo, network }
+}
+
+function parseFundPolyArgs(text: string, fallbackNetwork: Network): ParsedRequestArgs {
+  const parts = text.trim().split(/\s+/)
+  const amount = parseUsdcAmount(parts[1])
+  if (!amount) return { error: 'Use /fundpoly 25 from base. Amounts must use up to 6 decimals.' }
+
+  let network = fallbackNetwork
+  const fromIndex = parts.findIndex(part => part.toLowerCase() === 'from' || part.toLowerCase() === 'on')
+  if (fromIndex >= 0) {
+    network = parseNetwork(parts[fromIndex + 1], fallbackNetwork)
+  }
+
+  return { amount, memo: 'Polymarket account funding', network }
 }
 
 function parsePaidQuestionArgs(text: string, fallbackNetwork: Network): ParsedPaidQuestionArgs {
@@ -417,6 +498,17 @@ function promptForSolanaRecipient(): CommandResult {
   }
 }
 
+function promptForPolymarketAddress(): CommandResult {
+  return {
+    text: withFooter([
+      'Paste your Polymarket public wallet address.',
+      '',
+      'This is the 0x address from your Polymarket profile/deposit wallet. It is used only for funding links and public portfolio lookup.',
+    ]),
+    forceReplyPlaceholder: '0xYourPolymarketWallet',
+  }
+}
+
 function getRecipientForNetwork(profile: UserProfile, config: AppConfig, network: Network) {
   return network === 'solana'
     ? profile.solanaAddress ?? config.defaultSolanaAddress
@@ -452,6 +544,400 @@ async function fetchWithTimeout(url: string, init?: RequestInit) {
     return await fetch(url, { ...init, signal: controller.signal })
   } finally {
     clearTimeout(timer)
+  }
+}
+
+function sleep(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+async function fetchPolymarketJson(url: string) {
+  let lastError: unknown
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const response = await fetchWithTimeout(url, {
+        headers: {
+          accept: 'application/json',
+          'user-agent': 'HashPayLinkPhotonAgent/0.1',
+        },
+      })
+      if (!response.ok) return null
+      return await response.json() as unknown
+    } catch (err) {
+      lastError = err
+      await sleep(250 * (attempt + 1))
+    }
+  }
+  if (lastError) console.warn('[polymarket] request failed:', lastError instanceof Error ? lastError.message : String(lastError))
+  return null
+}
+
+async function getPolymarketDepositAddresses(address: string): Promise<PolymarketDepositAddresses | { error: string }> {
+  try {
+    const response = await fetchWithTimeout('https://bridge.polymarket.com/deposit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ address }),
+    })
+    const data = await response.json() as {
+      address?: PolymarketDepositAddresses
+      error?: string
+      message?: string
+    }
+    if (!response.ok || !data.address) {
+      return { error: data.error ?? data.message ?? 'Could not create Polymarket deposit address.' }
+    }
+    return data.address
+  } catch {
+    return { error: 'Polymarket deposit service is unavailable. Try again shortly.' }
+  }
+}
+
+async function ensurePolymarketDepositAddresses(profile: UserProfile, store: ProfileStore, userId: string) {
+  if (!profile.polymarketAddress) return { error: 'Set your Polymarket wallet first with /setpoly 0xYourPolymarketWallet.' }
+  if (profile.polymarketDepositAddresses?.evm || profile.polymarketDepositAddresses?.svm) {
+    return profile.polymarketDepositAddresses
+  }
+  const addresses = await getPolymarketDepositAddresses(profile.polymarketAddress)
+  if ('error' in addresses) return addresses
+  await store.updateUser(userId, { polymarketDepositAddresses: addresses })
+  return addresses
+}
+
+function polymarketRecipientForNetwork(addresses: PolymarketDepositAddresses, network: Network) {
+  return network === 'solana' ? addresses.svm : addresses.evm
+}
+
+async function fetchPolymarketPositions(address: string) {
+  const response = await fetchWithTimeout(`https://data-api.polymarket.com/positions?user=${encodeURIComponent(address)}&limit=5&sortBy=CURRENT&sortDirection=DESC&sizeThreshold=0`)
+  if (!response.ok) throw new Error('Could not fetch Polymarket positions.')
+  return await response.json() as PolymarketPosition[]
+}
+
+async function fetchPolymarketValue(address: string) {
+  const response = await fetchWithTimeout(`https://data-api.polymarket.com/value?user=${encodeURIComponent(address)}`)
+  if (!response.ok) return null
+  const data = await response.json() as PolymarketValueResponse | number
+  if (typeof data === 'number') return data
+  return data.value ?? data.totalValue ?? data.currentValue ?? data.total ?? null
+}
+
+function formatUsdValue(value: number | null | undefined) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 'unavailable'
+  return `${formatUsdc(value)} USDC`
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
+}
+
+function readString(record: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = record[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return undefined
+}
+
+function readNumber(record: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = record[key]
+    const parsed = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : Number.NaN
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return undefined
+}
+
+function readNestedNumber(record: Record<string, unknown>, paths: string[][]) {
+  for (const path of paths) {
+    let current: unknown = record
+    for (const part of path) {
+      const currentRecord = asRecord(current)
+      current = currentRecord?.[part]
+    }
+    const parsed = typeof current === 'number' ? current : typeof current === 'string' ? Number(current) : Number.NaN
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return undefined
+}
+
+function normalizeProbability(value: number | undefined) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined
+  const normalized = value > 1 && value <= 100 ? value / 100 : value
+  return Math.min(0.99, Math.max(0.01, normalized))
+}
+
+function normalizeSpread(value: number | undefined) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined
+  if (value <= 0) return undefined
+  return value > 1 ? value / 100 : value
+}
+
+function clampPrice(value: number) {
+  return Math.min(0.99, Math.max(0.01, value))
+}
+
+function formatCents(value: number | undefined) {
+  return typeof value === 'number' && Number.isFinite(value) ? `${(value * 100).toFixed(1).replace(/\.0$/, '')}c` : 'n/a'
+}
+
+function formatOptionalUsdc(value: number | undefined) {
+  return typeof value === 'number' && Number.isFinite(value) ? `${formatUsdc(value)} USDC` : 'n/a'
+}
+
+function extractPolymarketSlug(raw: string) {
+  const value = raw.trim()
+  if (!value) return ''
+  try {
+    const url = new URL(value)
+    const parts = url.pathname.split('/').filter(Boolean)
+    return parts.at(-1) ?? value
+  } catch {
+    return value.replace(/^\/+|\/+$/g, '')
+  }
+}
+
+function extractRewardMarkets(data: unknown): PolymarketRewardMarket[] {
+  if (Array.isArray(data)) return data.map(asRecord).filter((item): item is PolymarketRewardMarket => Boolean(item))
+  const record = asRecord(data)
+  if (!record) return []
+  for (const key of ['data', 'markets', 'results']) {
+    const value = record[key]
+    if (Array.isArray(value)) return value.map(asRecord).filter((item): item is PolymarketRewardMarket => Boolean(item))
+  }
+  return []
+}
+
+async function fetchPolymarketRewardMarkets(query?: string) {
+  const search = query ? `&q=${encodeURIComponent(query)}` : ''
+  const urls = [
+    `https://clob.polymarket.com/rewards/markets/multi?page_size=100&order_by=rate_per_day&position=DESC${search}`,
+    'https://clob.polymarket.com/rewards/markets/current',
+  ]
+
+  for (const url of urls) {
+    const data = await fetchPolymarketJson(url)
+    const markets = extractRewardMarkets(data)
+    if (markets.length) return markets
+  }
+
+  return []
+}
+
+function extractPolymarketTokenIds(market: PolymarketRewardMarket) {
+  const ids = new Set<string>()
+  for (const key of ['token_id', 'tokenId', 'asset_id', 'assetId', 'clobTokenId']) {
+    const value = market[key]
+    if (typeof value === 'string' && value.trim()) ids.add(value.trim())
+    if (typeof value === 'number' && Number.isFinite(value)) ids.add(String(value))
+  }
+
+  for (const key of ['tokens', 'outcomes', 'outcomeTokens', 'rewards']) {
+    const items = market[key]
+    if (!Array.isArray(items)) continue
+    for (const item of items) {
+      const record = asRecord(item)
+      if (!record) continue
+      for (const idKey of ['token_id', 'tokenId', 'asset_id', 'assetId', 'clobTokenId']) {
+        const value = record[idKey]
+        if (typeof value === 'string' && value.trim()) ids.add(value.trim())
+        if (typeof value === 'number' && Number.isFinite(value)) ids.add(String(value))
+      }
+    }
+  }
+
+  return [...ids]
+}
+
+function readBookPrice(level: PolymarketBookLevel) {
+  const parsed = typeof level.price === 'number' ? level.price : typeof level.price === 'string' ? Number(level.price) : Number.NaN
+  return normalizeProbability(parsed)
+}
+
+async function fetchPolymarketBook(tokenId: string): Promise<PolymarketBookSummary> {
+  const data = await fetchPolymarketJson(`https://clob.polymarket.com/book?token_id=${encodeURIComponent(tokenId)}`) as PolymarketBookResponse | null
+  if (!data) return {}
+  const bidPrices = (data.bids ?? []).map(readBookPrice).filter((price): price is number => typeof price === 'number')
+  const askPrices = (data.asks ?? []).map(readBookPrice).filter((price): price is number => typeof price === 'number')
+  const bestBid = bidPrices.length ? Math.max(...bidPrices) : undefined
+  const bestAsk = askPrices.length ? Math.min(...askPrices) : undefined
+  const spread = typeof bestBid === 'number' && typeof bestAsk === 'number' ? Math.max(0, bestAsk - bestBid) : undefined
+  const midpoint = typeof bestBid === 'number' && typeof bestAsk === 'number' ? (bestBid + bestAsk) / 2 : bestBid ?? bestAsk
+  return { bestBid, bestAsk, midpoint, spread }
+}
+
+function baseLpOpportunity(market: PolymarketRewardMarket): PolymarketLpOpportunity {
+  const title = readString(market, ['question', 'title', 'market_slug', 'slug', 'condition_id']) ?? 'Untitled reward market'
+  const rewardsConfig = Array.isArray(market.rewards_config) ? market.rewards_config : []
+  const configDailyReward = rewardsConfig.reduce((sum, item) => {
+    const record = asRecord(item)
+    return sum + (record ? readNumber(record, ['rate_per_day', 'ratePerDay']) ?? 0 : 0)
+  }, 0)
+  const dailyReward =
+    readNumber(market, ['total_daily_rate', 'native_daily_rate', 'daily_reward', 'dailyRewards', 'rewards_daily_rate', 'rate_per_day', 'reward']) ??
+    (configDailyReward > 0 ? configDailyReward : undefined) ??
+    readNestedNumber(market, [['reward_config', 'daily_reward'], ['rewardConfig', 'dailyReward']])
+  const maxSpread = normalizeSpread(
+    readNumber(market, ['max_spread', 'maxSpread', 'rewards_max_spread', 'rewardsMaxSpread']) ??
+    readNestedNumber(market, [['reward_config', 'max_spread'], ['rewardConfig', 'maxSpread']]),
+  )
+  const minSize =
+    readNumber(market, ['min_size', 'minSize', 'rewards_min_size', 'rewardsMinSize']) ??
+    readNestedNumber(market, [['reward_config', 'min_size'], ['rewardConfig', 'minSize']])
+  const liquidity = readNumber(market, ['liquidity', 'volume_24hr', 'volume24hr', 'volume', 'oneDayVolume'])
+
+  return {
+    title,
+    slug: readString(market, ['slug', 'market_slug', 'event_slug']),
+    tokenId: extractPolymarketTokenIds(market)[0],
+    dailyReward,
+    maxSpread,
+    minSize,
+    liquidity,
+    risk: 'medium',
+    score: 0,
+  }
+}
+
+async function analyzePolymarketLpMarket(market: PolymarketRewardMarket): Promise<PolymarketLpOpportunity> {
+  const opportunity = baseLpOpportunity(market)
+  const book: PolymarketBookSummary = opportunity.tokenId ? await fetchPolymarketBook(opportunity.tokenId).catch(() => ({})) : {}
+  const midpoint = book.midpoint ?? normalizeProbability(readNumber(market, ['last_trade_price', 'lastPrice', 'price', 'midpoint']))
+  const spread = book.spread
+  const offset = Math.min(0.02, Math.max(0.005, (opportunity.maxSpread ?? 0.03) * 0.35))
+  const suggestedYesBid = typeof midpoint === 'number' ? clampPrice(midpoint - offset) : undefined
+  const suggestedNoBid = typeof midpoint === 'number' ? clampPrice((1 - midpoint) - offset) : undefined
+  const eligible = typeof spread === 'number' && typeof opportunity.maxSpread === 'number' ? spread <= opportunity.maxSpread : undefined
+
+  let risk: PolymarketLpOpportunity['risk'] = 'medium'
+  if (typeof midpoint === 'number' && (midpoint < 0.08 || midpoint > 0.92)) risk = 'high'
+  if (typeof spread === 'number' && typeof opportunity.maxSpread === 'number' && spread > opportunity.maxSpread) risk = 'high'
+  if (risk !== 'high' && typeof spread === 'number' && spread <= 0.02 && typeof midpoint === 'number' && midpoint > 0.15 && midpoint < 0.85) {
+    risk = 'low'
+  }
+
+  const rewardScore = opportunity.dailyReward ?? 0
+  const liquidityScore = Math.min(500, opportunity.liquidity ?? 0) / 25
+  const eligibilityScore = eligible === false ? -50 : eligible === true ? 25 : 0
+  const spreadPenalty = typeof spread === 'number' ? spread * 100 : 8
+  const riskPenalty = risk === 'high' ? 30 : risk === 'medium' ? 10 : 0
+
+  return {
+    ...opportunity,
+    ...book,
+    midpoint,
+    suggestedYesBid,
+    suggestedNoBid,
+    eligible,
+    risk,
+    score: rewardScore + liquidityScore + eligibilityScore - spreadPenalty - riskPenalty,
+  }
+}
+
+function formatLpOpportunity(opportunity: PolymarketLpOpportunity, index?: number) {
+  const prefix = typeof index === 'number' ? `${index}. ` : ''
+  return [
+    `${prefix}${opportunity.title.slice(0, 90)}`,
+    `Reward/day: ${formatOptionalUsdc(opportunity.dailyReward)} | Max spread: ${formatCents(opportunity.maxSpread)} | Min size: ${formatOptionalUsdc(opportunity.minSize)}`,
+    `Book: bid ${formatCents(opportunity.bestBid)} / ask ${formatCents(opportunity.bestAsk)} | live spread ${formatCents(opportunity.spread)}`,
+    `Suggested maker quote: YES ${formatCents(opportunity.suggestedYesBid)} / NO ${formatCents(opportunity.suggestedNoBid)} | risk: ${opportunity.risk}`,
+    `Reward check: ${opportunity.eligible === true ? 'inside reward spread' : opportunity.eligible === false ? 'outside reward spread' : 'needs live book review'}`,
+    opportunity.slug ? `Market: https://polymarket.com/market/${opportunity.slug}` : undefined,
+  ].filter((line): line is string => Boolean(line))
+}
+
+async function formatPolymarketLpScout(rawQuery: string): Promise<CommandResult> {
+  const query = rawQuery.replace(/^\/lp\b/i, '').trim()
+  const topic = !query || query.toLowerCase() === 'best' ? '' : query.toLowerCase()
+  const markets = await fetchPolymarketRewardMarkets(topic)
+  if (!markets.length) {
+    return { text: 'Polymarket reward markets are unavailable right now. Try again shortly.' }
+  }
+
+  const filtered = topic
+    ? markets.filter(market => {
+      const opportunity = baseLpOpportunity(market)
+      return `${opportunity.title} ${opportunity.slug ?? ''}`.toLowerCase().includes(topic)
+    })
+    : markets
+  const candidates = filtered.slice(0, 12)
+  if (!candidates.length) {
+    return { text: `No active Polymarket reward markets matched "${query}". Try /lp best.` }
+  }
+
+  const opportunities = await Promise.all(candidates.map(analyzePolymarketLpMarket))
+  const ranked = opportunities.sort((a, b) => b.score - a.score).slice(0, 3)
+  return {
+    text: withFooter([
+      'Polymarket LP Scout',
+      '',
+      'Educational signal only. Rewards, fills, and market outcomes are not guaranteed.',
+      '',
+      ...ranked.flatMap((opportunity, index) => [
+        ...formatLpOpportunity(opportunity, index + 1),
+        '',
+      ]).slice(0, -1),
+      '',
+      'To fund your account:',
+      '/fundpoly 25 from base',
+    ]),
+  }
+}
+
+async function formatSinglePolymarketMarket(rawInput: string): Promise<CommandResult> {
+  const input = rawInput.replace(/^\/lpmarket\b/i, '').trim()
+  const slug = extractPolymarketSlug(input).toLowerCase()
+  if (!slug) return { text: 'Add a Polymarket URL or slug. Example: /lpmarket will-bitcoin-hit-100k' }
+  const markets = await fetchPolymarketRewardMarkets(slug.replace(/-/g, ' '))
+  const match = markets.find(market => {
+    const opportunity = baseLpOpportunity(market)
+    return [opportunity.slug, opportunity.title].some(value => value?.toLowerCase().includes(slug) || slug.includes(value?.toLowerCase() ?? ''))
+  })
+  if (!match) return { text: `I could not find that active reward market. Try /lp best or paste the exact Polymarket market URL.` }
+  const opportunity = await analyzePolymarketLpMarket(match)
+  return {
+    text: withFooter([
+      'Polymarket LP Market',
+      '',
+      ...formatLpOpportunity(opportunity),
+      '',
+      'Use this as a quote-planning check, not financial advice. Confirm the live book on Polymarket before placing orders.',
+    ]),
+  }
+}
+
+async function formatPolymarketPortfolio(profile: UserProfile): Promise<CommandResult> {
+  const address = profile.polymarketAddress
+  if (!address) return promptForPolymarketAddress()
+
+  try {
+    const [positions, value] = await Promise.all([
+      fetchPolymarketPositions(address),
+      fetchPolymarketValue(address),
+    ])
+    return {
+      text: withFooter([
+        'Polymarket account',
+        '',
+        `Wallet: ${shortAddress(address)}`,
+        `Open position value: ${formatUsdValue(value)}`,
+        `Open positions: ${positions.length}`,
+        '',
+        ...(positions.length
+          ? positions.flatMap((position, index) => [
+            `${index + 1}. ${(position.title ?? 'Untitled market').slice(0, 80)}`,
+            `${position.outcome ?? 'Outcome'} - ${formatUsdValue(position.currentValue)} at ${typeof position.curPrice === 'number' ? `${Math.round(position.curPrice * 100)}c` : 'market price unavailable'}`,
+            `PnL: ${formatUsdValue(position.cashPnl)}${typeof position.percentPnl === 'number' ? ` (${position.percentPnl.toFixed(2)}%)` : ''}`,
+            '',
+          ]).slice(0, -1)
+          : ['No open positions found from the public Data API.']),
+        '',
+        'To fund:',
+        '/fundpoly 25 from base',
+      ]),
+    }
+  } catch {
+    return { text: 'Could not fetch Polymarket portfolio right now. Try again shortly.' }
   }
 }
 
@@ -661,7 +1147,7 @@ async function answerPaidAccessRequest(
   return {
     text: withFooter([
       'Payment verified on 0G.',
-      'Agent: Hash PayLink Circle/Arc Strategy AI',
+      'Agent: Hash PayLink Circle/Arc/Polymarket Strategy AI',
       '',
       'Answer:',
       result.answer ?? '',
@@ -709,6 +1195,24 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     return { text: withFooter([`Solana recipient saved: ${shortAddress(trimmed)}`]) }
   }
 
+  if (/Paste your Polymarket public wallet address/i.test(replyToText)) {
+    if (!isEvmAddress(trimmed)) return promptForPolymarketAddress()
+    const addresses = await getPolymarketDepositAddresses(trimmed)
+    if ('error' in addresses) return { text: addresses.error }
+    await context.store.updateUser(context.userId, {
+      polymarketAddress: trimmed,
+      polymarketDepositAddresses: addresses,
+    })
+    return {
+      text: withFooter([
+        `Polymarket wallet saved: ${shortAddress(trimmed)}`,
+        '',
+        `Base/Arbitrum funding address: ${shortAddress(addresses.evm)}`,
+        addresses.svm ? `Solana funding address: ${shortAddress(addresses.svm)}` : 'Solana funding address: unavailable',
+      ]),
+    }
+  }
+
   if (cmd === '/start' || cmd === '/help') {
     return {
       text: withFooter([
@@ -733,6 +1237,29 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     if (!isLikelySolanaAddress(address)) return promptForSolanaRecipient()
     await context.store.updateUser(context.userId, { solanaAddress: address })
     return { text: withFooter([`Solana recipient saved: ${shortAddress(address)}`]) }
+  }
+
+  if (cmd === '/setpoly') {
+    const address = trimmed.split(/\s+/)[1]
+    if (!address) return promptForPolymarketAddress()
+    if (!isEvmAddress(address)) return promptForPolymarketAddress()
+    const addresses = await getPolymarketDepositAddresses(address)
+    if ('error' in addresses) return { text: addresses.error }
+    await context.store.updateUser(context.userId, {
+      polymarketAddress: address,
+      polymarketDepositAddresses: addresses,
+    })
+    return {
+      text: withFooter([
+        `Polymarket wallet saved: ${shortAddress(address)}`,
+        '',
+        `Base/Arbitrum funding address: ${shortAddress(addresses.evm)}`,
+        addresses.svm ? `Solana funding address: ${shortAddress(addresses.svm)}` : 'Solana funding address: unavailable',
+        '',
+        'Fund from Telegram:',
+        '/fundpoly 25 from base',
+      ]),
+    }
   }
 
   if (cmd === '/setpaid') {
@@ -793,6 +1320,7 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
         `Telegram user ID: ${context.userId}`,
         `EVM: ${shortAddress(profile.evmAddress)}`,
         `Solana: ${shortAddress(profile.solanaAddress)}`,
+        `Polymarket: ${shortAddress(profile.polymarketAddress)}`,
         `Default network: ${userNetwork(profile, config)}`,
         `Recent requests: ${profile.recentRequests?.length ?? 0}`,
         `AI access requests: ${profile.recentAiRequests?.length ?? 0}`,
@@ -832,6 +1360,68 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     return formatRequest(request)
   }
 
+  if (cmd === '/fundpoly') {
+    const parsed = parseFundPolyArgs(trimmed, userNetwork(profile, config))
+    if ('error' in parsed) return { text: parsed.error }
+    if (!profile.polymarketAddress) return promptForPolymarketAddress()
+
+    const addresses = await ensurePolymarketDepositAddresses(profile, context.store, context.userId)
+    if ('error' in addresses) return { text: addresses.error }
+
+    const recipient = polymarketRecipientForNetwork(addresses, parsed.network)
+    if (!recipient) {
+      return { text: `Polymarket bridge did not return a ${parsed.network} funding address. Try /fundpoly ${parsed.amount} from base.` }
+    }
+    if (parsed.network === 'solana' && !isLikelySolanaAddress(recipient)) {
+      return { text: 'Polymarket Solana funding address is invalid. Try funding from base instead.' }
+    }
+    if (parsed.network !== 'solana' && !isEvmAddress(recipient)) {
+      return { text: 'Polymarket EVM funding address is invalid. Try again shortly.' }
+    }
+
+    const request = buildPaymentRequest({
+      baseUrl: config.hashPayLinkBaseUrl,
+      amount: parsed.amount,
+      memo: 'Polymarket account funding',
+      network: parsed.network,
+      evmAddress: parsed.network === 'solana' ? config.defaultEvmAddress : recipient,
+      solanaAddress: parsed.network === 'solana' ? recipient : config.defaultSolanaAddress,
+      returnUrl: config.telegramReturnUrl,
+    })
+    requests.set(request.id, request)
+    latestRequestByUser.set(context.userId, request.id)
+    await context.store.updateUser(context.userId, {
+      latestRequest: request,
+      recentRequests: [request, ...(profile.recentRequests ?? [])].slice(0, 5),
+    })
+    return {
+      text: withFooter([
+        'Polymarket funding link created',
+        '',
+        `${request.amount} USDC`,
+        `From: ${request.network}`,
+        `Polymarket wallet: ${shortAddress(profile.polymarketAddress)}`,
+        `Bridge deposit address: ${shortAddress(recipient)}`,
+        '',
+        'Pay the link, then use /status to verify the Hash PayLink payment.',
+        'After the bridge credits Polymarket, use /poly to check public positions/value.',
+      ]),
+      buttons: requestButtons(request),
+    }
+  }
+
+  if (cmd === '/poly' || cmd === '/positions') {
+    return formatPolymarketPortfolio(profile)
+  }
+
+  if (cmd === '/lp') {
+    return formatPolymarketLpScout(trimmed)
+  }
+
+  if (cmd === '/lpmarket') {
+    return formatSinglePolymarketMarket(trimmed)
+  }
+
   if (cmd === '/askpaid') {
     const parsed = parsePaidQuestionArgs(trimmed, userNetwork(profile, config))
     if ('error' in parsed) return { text: parsed.error }
@@ -844,7 +1434,7 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     const request = buildPaymentRequest({
       baseUrl: config.hashPayLinkBaseUrl,
       amount,
-      memo: 'Hash PayLink Circle/Arc AI access',
+      memo: 'Hash PayLink Strategy AI access',
       network: parsed.network,
       evmAddress: parsed.network === 'solana' ? context.store.getPlatform().evmAddress ?? config.defaultEvmAddress : recipient,
       solanaAddress: parsed.network === 'solana' ? recipient : context.store.getPlatform().solanaAddress ?? config.defaultSolanaAddress,
@@ -866,7 +1456,7 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
         '',
         `Price: ${request.amount} USDC`,
         `Network: ${request.network}`,
-        'Agent: Hash PayLink Circle/Arc Strategy AI',
+        'Agent: Hash PayLink Circle/Arc/Polymarket Strategy AI',
         '',
         'Question:',
         parsed.question,

@@ -17,6 +17,9 @@ Bot replies include the footer `Built for Photon - Powered by Hash PayLink` to k
 /request 10 USDC for design work
 /request 25 USDC for event ticket on solana
 /request 25 USDC for invoice on arbitrum
+/setpoly 0xYourPolymarketWallet
+/fundpoly 25 from base
+/poly
 /askpaid What should I build for the 0G hackathon?
 /answer your-payer-name
 /verifyagent marketbot https://api.marketbot.xyz/ask price=2
@@ -51,9 +54,26 @@ Base is the default network. Add `on solana` or `on arbitrum` to route a single 
 
 WhatsApp is intentionally limited to one-time Hash PayLink payment requests and tracking. It supports `/request`, `/requests`, `/status`, `/remind`, and `/help`; AI access, agent registration, and StreamPay stay Telegram-only for now.
 
+**Polymarket Funding**
+
+Telegram users can save a public Polymarket wallet and create a Hash PayLink funding link:
+
+```text
+/setpoly 0xYourPolymarketWallet
+/fundpoly 25 from base
+/poly
+/lp best
+/lp crypto
+/lpmarket polymarket-url-or-slug
+```
+
+`/setpoly` calls Polymarket's Bridge API to generate deposit addresses for the user's Polymarket wallet. `/fundpoly` opens a normal Hash PayLink payer page that sends USDC to the Polymarket bridge deposit address from Base, Arbitrum, or Solana. `/status` verifies the Hash PayLink payment, and `/poly` reads public Polymarket positions/value for the saved wallet.
+
+`/lp best` scans active Polymarket reward markets from the public CLOB rewards API, checks live order books where token IDs are available, and returns a compact maker-liquidity view: daily rewards, max spread, min size, live spread, suggested YES/NO quote levels, and risk. `/lp crypto` filters the same scan by topic. `/lpmarket` inspects one market URL or slug. These commands are educational product signals only; they do not guarantee fills, rewards, badges, profit, or market outcomes.
+
 **AI Paid Access**
 
-Use `/askpaid` to create a payment-gated question for the built-in Hash PayLink Circle/Arc Strategy AI endpoint. The PayLink is paid to the configured Hash PayLink recipient wallet, not to the caller's wallet. After the payer completes the PayLink, they can run `/answer <payer-name>` or reply `I paid as <payer-name>` using the payer name entered on the payment page. The bot verifies payment through Hash PayLink's 0G proof endpoint before returning the answer.
+Use `/askpaid` to create a payment-gated question for the built-in Hash PayLink Circle/Arc/Polymarket Strategy AI endpoint. The PayLink is paid to the configured Hash PayLink recipient wallet, not to the caller's wallet. After the payer completes the PayLink, they can run `/answer <payer-name>` or reply `I paid as <payer-name>` using the payer name entered on the payment page. The bot verifies payment through Hash PayLink's 0G proof endpoint before returning the answer.
 
 The built-in paid AI recipient can be set from Telegram by an admin:
 

@@ -5,6 +5,13 @@ import type { AgentRegistration, PaymentRequest, PendingStreamRequest, StreamReq
 export type UserProfile = {
   evmAddress?: string
   solanaAddress?: string
+  polymarketAddress?: string
+  polymarketDepositAddresses?: {
+    evm?: string
+    svm?: string
+    btc?: string
+    tvm?: string
+  }
   defaultNetwork?: 'base' | 'arbitrum' | 'solana'
   latestRequest?: PaymentRequest
   recentRequests?: PaymentRequest[]
