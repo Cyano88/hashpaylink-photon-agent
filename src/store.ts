@@ -85,7 +85,7 @@ export class ProfileStore {
     const profile = this.getUser(userId)
     const messagesByChat = { ...(profile.botMessagesByChat ?? {}) }
     const messages = [...(messagesByChat[chatId] ?? []), messageId]
-    messagesByChat[chatId] = messages.slice(-30)
+    messagesByChat[chatId] = messages
     await this.updateUser(userId, { botMessagesByChat: messagesByChat })
   }
 

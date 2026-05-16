@@ -109,15 +109,15 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
         const text = message?.text
         if (!chatId || !userId || !text) continue
 
-        if (text.trim() === '/clear') {
+        if (/^\/clear(?:@\w+)?$/i.test(text.trim())) {
           const tracked = await store.clearBotMessages(String(userId), String(chatId))
           const deleted = (await Promise.all(tracked.map(messageId => deleteMessage(chatId, messageId))))
             .filter(Boolean).length
           await deleteMessage(chatId, message.message_id)
           const confirmation = await sendMessage(chatId, {
             text: deleted > 0
-              ? `Cleared ${deleted} recent Hash PayLink bot message${deleted === 1 ? '' : 's'}.`
-              : 'No recent Hash PayLink bot messages found to clear.',
+              ? `Cleared ${deleted} tracked Hash PayLink bot message${deleted === 1 ? '' : 's'} for you in this chat.`
+              : 'No tracked Hash PayLink bot messages found for you in this chat.',
           })
           setTimeout(() => {
             void deleteMessage(chatId, confirmation.message_id)
