@@ -6,16 +6,11 @@ export type UserProfile = {
   evmAddress?: string
   solanaAddress?: string
   polymarketAddress?: string
-  polymarketDepositAddresses?: {
-    evm?: string
-    svm?: string
-    btc?: string
-    tvm?: string
-  }
   defaultNetwork?: 'base' | 'arbitrum' | 'solana'
   latestRequest?: PaymentRequest
   recentRequests?: PaymentRequest[]
   recentAiRequests?: PaymentRequest[]
+  recentLpRequests?: PaymentRequest[]
   recentStreams?: StreamRequest[]
   pendingStreams?: PendingStreamRequest[]
   botMessagesByChat?: Record<string, number[]>
@@ -28,6 +23,7 @@ export type StoreData = {
     evmAddress?: string
     solanaAddress?: string
     paidAiPriceUsdc?: string
+    polymarketLpPriceUsdc?: string
   }
 }
 

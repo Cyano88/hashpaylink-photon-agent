@@ -55,12 +55,11 @@ const HELP_LINES = [
   '/remind',
   '/requests',
   '',
-  'Polymarket Funding',
+  'Polymarket Watchlist',
   '/setpoly 0xYourPolymarketWallet',
-  '/fundpoly 25 from base',
   '/poly',
   '',
-  'Polymarket LP Scout',
+  'Paid Polymarket LP Scout',
   '/lp best',
   '/lp crypto',
   '/lpmarket polymarket-url-or-slug',
@@ -84,6 +83,7 @@ const HELP_LINES = [
   '/network solana',
   '/setpaid evm 0xHashPayLinkWallet',
   '/setpaid price 1',
+  '/setlpprice 1',
   '/paidsettings',
   '/me',
   '/clear',
@@ -113,8 +113,6 @@ type ResolvedCircleRecipientWallet =
   | { found: true; walletAddress: string }
   | { found: false }
   | { error: string }
-
-type PolymarketDepositAddresses = NonNullable<UserProfile['polymarketDepositAddresses']>
 
 type PolymarketPosition = {
   title?: string
@@ -244,20 +242,6 @@ function parseRequestArgs(text: string, fallbackNetwork: Network): ParsedRequest
     return { error: `Memo is too long. Keep it under ${MAX_MEMO_LENGTH} characters.` }
   }
   return { amount, memo, network }
-}
-
-function parseFundPolyArgs(text: string, fallbackNetwork: Network): ParsedRequestArgs {
-  const parts = text.trim().split(/\s+/)
-  const amount = parseUsdcAmount(parts[1])
-  if (!amount) return { error: 'Use /fundpoly 25 from base. Amounts must use up to 6 decimals.' }
-
-  let network = fallbackNetwork
-  const fromIndex = parts.findIndex(part => part.toLowerCase() === 'from' || part.toLowerCase() === 'on')
-  if (fromIndex >= 0) {
-    network = parseNetwork(parts[fromIndex + 1], fallbackNetwork)
-  }
-
-  return { amount, memo: 'Polymarket account funding', network }
 }
 
 function parsePaidQuestionArgs(text: string, fallbackNetwork: Network): ParsedPaidQuestionArgs {
@@ -507,7 +491,7 @@ function promptForPolymarketAddress(): CommandResult {
     text: withFooter([
       'Paste your Polymarket public wallet address.',
       '',
-      'This is the 0x address from your Polymarket profile/deposit wallet. It is used only for funding links and public portfolio lookup.',
+      'This is the 0x address from your Polymarket profile. It is used only for public portfolio lookup.',
     ]),
     forceReplyPlaceholder: '0xYourPolymarketWallet',
   }
@@ -574,42 +558,6 @@ async function fetchPolymarketJson(url: string) {
   }
   if (lastError) console.warn('[polymarket] request failed:', lastError instanceof Error ? lastError.message : String(lastError))
   return null
-}
-
-async function getPolymarketDepositAddresses(address: string): Promise<PolymarketDepositAddresses | { error: string }> {
-  try {
-    const response = await fetchWithTimeout('https://bridge.polymarket.com/deposit', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ address }),
-    })
-    const data = await response.json() as {
-      address?: PolymarketDepositAddresses
-      error?: string
-      message?: string
-    }
-    if (!response.ok || !data.address) {
-      return { error: data.error ?? data.message ?? 'Could not create Polymarket deposit address.' }
-    }
-    return data.address
-  } catch {
-    return { error: 'Polymarket deposit service is unavailable. Try again shortly.' }
-  }
-}
-
-async function ensurePolymarketDepositAddresses(profile: UserProfile, store: ProfileStore, userId: string) {
-  if (!profile.polymarketAddress) return { error: 'Set your Polymarket wallet first with /setpoly 0xYourPolymarketWallet.' }
-  if (profile.polymarketDepositAddresses?.evm || profile.polymarketDepositAddresses?.svm) {
-    return profile.polymarketDepositAddresses
-  }
-  const addresses = await getPolymarketDepositAddresses(profile.polymarketAddress)
-  if ('error' in addresses) return addresses
-  await store.updateUser(userId, { polymarketDepositAddresses: addresses })
-  return addresses
-}
-
-function polymarketRecipientForNetwork(addresses: PolymarketDepositAddresses, network: Network) {
-  return network === 'solana' ? addresses.svm : addresses.evm
 }
 
 async function fetchPolymarketPositions(address: string) {
@@ -880,7 +828,7 @@ function formatLpOpportunity(opportunity: PolymarketLpOpportunity, index?: numbe
   ].filter((line): line is string => Boolean(line))
 }
 
-async function formatPolymarketLpScout(rawQuery: string): Promise<CommandResult> {
+async function formatPolymarketLpScoutResult(rawQuery: string): Promise<CommandResult> {
   const query = rawQuery.replace(/^\/lp\b/i, '').trim()
   const topic = !query || query.toLowerCase() === 'best' ? '' : query.toLowerCase()
   const markets = await fetchPolymarketRewardMarkets(topic)
@@ -913,8 +861,9 @@ async function formatPolymarketLpScout(rawQuery: string): Promise<CommandResult>
         '',
       ]).slice(0, -1),
       '',
-      'To fund your account:',
-      '/fundpoly 25 from base',
+      'To watch your public positions:',
+      '/setpoly 0xYourPolymarketWallet',
+      '/poly',
     ]),
   }
 }
@@ -938,6 +887,53 @@ async function formatSinglePolymarketMarket(rawInput: string): Promise<CommandRe
       '',
       'Use this as a quote-planning check, not financial advice. Confirm the live book on Polymarket before placing orders.',
     ]),
+  }
+}
+
+async function createPaidLpRequest(rawQuery: string, profile: UserProfile, config: AppConfig, context: CommandContext): Promise<CommandResult> {
+  const platform = context.store.getPlatform()
+  const amount = platform.polymarketLpPriceUsdc
+  if (!amount) {
+    return { text: 'Polymarket LP Scout price is not set. Ask a Hash PayLink admin to run /setlpprice 1.' }
+  }
+
+  const network = userNetwork(profile, config)
+  const recipient = getPlatformRecipientForNetwork(context.store, config, network)
+  if (!recipient) {
+    return { text: `Polymarket LP Scout recipient is not configured for ${network}. Ask the Hash PayLink admin to set /setpaid evm or /setpaid solana.` }
+  }
+
+  const request = buildPaymentRequest({
+    baseUrl: config.hashPayLinkBaseUrl,
+    amount,
+    memo: 'Hash PayLink Polymarket LP Scout access',
+    network,
+    evmAddress: network === 'solana' ? context.store.getPlatform().evmAddress ?? config.defaultEvmAddress : recipient,
+    solanaAddress: network === 'solana' ? recipient : context.store.getPlatform().solanaAddress ?? config.defaultSolanaAddress,
+    returnUrl: config.telegramReturnUrl,
+    kind: 'lp_access',
+    question: rawQuery,
+  })
+  requests.set(request.id, request)
+  latestRequestByUser.set(context.userId, request.id)
+  await context.store.updateUser(context.userId, {
+    latestRequest: request,
+    recentLpRequests: [request, ...(profile.recentLpRequests ?? [])].slice(0, 5),
+    recentRequests: [request, ...(profile.recentRequests ?? [])].slice(0, 5),
+  })
+
+  return {
+    text: withFooter([
+      'Polymarket LP Scout access created',
+      '',
+      `${request.amount} USDC`,
+      `Network: ${request.network}`,
+      `Request: ${rawQuery || '/lp best'}`,
+      '',
+      'Pay to unlock the LP scan.',
+      ...paidAccessPayerHint(request),
+    ]),
+    buttons: answerButtons(request),
   }
 }
 
@@ -968,7 +964,8 @@ async function formatPolymarketPortfolio(profile: UserProfile): Promise<CommandR
           : ['No open positions found from the public Data API.']),
         '',
         'To fund:',
-        '/fundpoly 25 from base',
+        '/setpoly 0xYourPolymarketWallet',
+        '/poly',
       ]),
     }
   } catch {
@@ -1083,9 +1080,9 @@ function findRequest(id: string | undefined, profile: UserProfile) {
 }
 
 function latestPaidAccessRequest(profile: UserProfile) {
-  const recent = profile.recentAiRequests ?? []
-  return recent.find(request => request.kind === 'ai_access' || request.kind === 'agent_access')
-    ?? (profile.latestRequest?.kind === 'ai_access' || profile.latestRequest?.kind === 'agent_access'
+  const recent = [...(profile.recentAiRequests ?? []), ...(profile.recentLpRequests ?? [])]
+  return recent.find(request => request.kind === 'ai_access' || request.kind === 'agent_access' || request.kind === 'lp_access')
+    ?? (profile.latestRequest?.kind === 'ai_access' || profile.latestRequest?.kind === 'agent_access' || profile.latestRequest?.kind === 'lp_access'
       ? profile.latestRequest
       : undefined)
 }
@@ -1140,12 +1137,14 @@ function paidSettingsText(store: ProfileStore, config: AppConfig) {
     '',
     `EVM: ${shortAddress(platform.evmAddress ?? config.defaultEvmAddress)}`,
     `Solana: ${shortAddress(platform.solanaAddress ?? config.defaultSolanaAddress)}`,
-    `Default price: ${platform.paidAiPriceUsdc ?? 'not set'} USDC`,
+    `Paid AI price: ${platform.paidAiPriceUsdc ?? 'not set'} USDC`,
+    `Polymarket LP Scout price: ${platform.polymarketLpPriceUsdc ?? 'not set'} USDC`,
     '',
     'Set from Telegram:',
     '/setpaid evm 0xYourWallet',
     '/setpaid solana YourSolanaWallet',
     '/setpaid price 1',
+    '/setlpprice 1',
   ])
 }
 
@@ -1155,8 +1154,28 @@ async function answerPaidAccessRequest(
   config: AppConfig,
   context: CommandContext,
 ): Promise<CommandResult> {
-  if (request.kind !== 'ai_access' && request.kind !== 'agent_access') {
-    return { text: 'That request is a normal payment request, not paid AI access.' }
+  if (request.kind !== 'ai_access' && request.kind !== 'agent_access' && request.kind !== 'lp_access') {
+    return { text: 'That request is a normal payment request, not paid access.' }
+  }
+
+  if (request.kind === 'lp_access') {
+    const verifyUrl = `${config.hashPayLinkBaseUrl.replace(/\/+$/, '')}/api/agent-verify?eventId=${encodeURIComponent(request.id)}&payer=${encodeURIComponent(payer)}`
+    const verifyResponse = await fetchWithTimeout(verifyUrl)
+    const proof = await verifyResponse.json() as { verified?: boolean; proof?: { ogExplorer?: string } }
+    if (!verifyResponse.ok || !proof.verified) {
+      return { text: `Payment required. No verified LP Scout payment found for "${payer}" yet. If you just paid, wait 30-60 seconds and retry /answer ${payer}.` }
+    }
+    const result = await formatPolymarketLpScoutResult(request.question || '/lp best')
+    return {
+      text: [
+        'Payment verified on 0G.',
+        'Access: Polymarket LP Scout',
+        '',
+        result.text,
+        '',
+        proof.proof?.ogExplorer ? `Proof: ${proof.proof.ogExplorer}` : 'Proof: 0G verification returned',
+      ].join('\n'),
+    }
   }
 
   if (request.kind === 'agent_access') {
@@ -1232,18 +1251,13 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
 
   if (/Paste your Polymarket public wallet address/i.test(replyToText)) {
     if (!isEvmAddress(trimmed)) return promptForPolymarketAddress()
-    const addresses = await getPolymarketDepositAddresses(trimmed)
-    if ('error' in addresses) return { text: addresses.error }
     await context.store.updateUser(context.userId, {
       polymarketAddress: trimmed,
-      polymarketDepositAddresses: addresses,
     })
     return {
       text: withFooter([
         `Polymarket wallet saved: ${shortAddress(trimmed)}`,
-        '',
-        `Base/Arbitrum funding address: ${shortAddress(addresses.evm)}`,
-        addresses.svm ? `Solana funding address: ${shortAddress(addresses.svm)}` : 'Solana funding address: unavailable',
+        'This is used only for public position/value lookup.',
       ]),
     }
   }
@@ -1278,21 +1292,13 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     const address = trimmed.split(/\s+/)[1]
     if (!address) return promptForPolymarketAddress()
     if (!isEvmAddress(address)) return promptForPolymarketAddress()
-    const addresses = await getPolymarketDepositAddresses(address)
-    if ('error' in addresses) return { text: addresses.error }
     await context.store.updateUser(context.userId, {
       polymarketAddress: address,
-      polymarketDepositAddresses: addresses,
     })
     return {
       text: withFooter([
         `Polymarket wallet saved: ${shortAddress(address)}`,
-        '',
-        `Base/Arbitrum funding address: ${shortAddress(addresses.evm)}`,
-        addresses.svm ? `Solana funding address: ${shortAddress(addresses.svm)}` : 'Solana funding address: unavailable',
-        '',
-        'Fund from Telegram:',
-        '/fundpoly 25 from base',
+        'This is used only for public position/value lookup.',
       ]),
     }
   }
@@ -1318,6 +1324,14 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
       return { text: withFooter([`Built-in paid AI Solana recipient saved: ${shortAddress(address)}`]) }
     }
     return { text: 'Use /setpaid evm 0xYourWallet, /setpaid solana YourSolanaWallet, or /setpaid price 1.' }
+  }
+
+  if (cmd === '/setlpprice') {
+    if (!isAdmin(config, context.userId)) return { text: adminRequiredText() }
+    const amount = parseUsdcAmount(trimmed.split(/\s+/)[1])
+    if (!amount) return { text: 'Use /setlpprice 1. Amounts must use up to 6 decimals.' }
+    await context.store.updatePlatform({ polymarketLpPriceUsdc: amount })
+    return { text: withFooter([`Polymarket LP Scout price saved: ${amount} USDC`]) }
   }
 
   if (cmd === '/paidsettings') {
@@ -1395,53 +1409,16 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     return formatRequest(request)
   }
 
-  if (cmd === '/fundpoly') {
-    const parsed = parseFundPolyArgs(trimmed, userNetwork(profile, config))
-    if ('error' in parsed) return { text: parsed.error }
-    if (!profile.polymarketAddress) return promptForPolymarketAddress()
-
-    const addresses = await ensurePolymarketDepositAddresses(profile, context.store, context.userId)
-    if ('error' in addresses) return { text: addresses.error }
-
-    const recipient = polymarketRecipientForNetwork(addresses, parsed.network)
-    if (!recipient) {
-      return { text: `Polymarket bridge did not return a ${parsed.network} funding address. Try /fundpoly ${parsed.amount} from base.` }
-    }
-    if (parsed.network === 'solana' && !isLikelySolanaAddress(recipient)) {
-      return { text: 'Polymarket Solana funding address is invalid. Try funding from base instead.' }
-    }
-    if (parsed.network !== 'solana' && !isEvmAddress(recipient)) {
-      return { text: 'Polymarket EVM funding address is invalid. Try again shortly.' }
-    }
-
-    return {
-      text: withFooter([
-        'Polymarket funding guide',
-        '',
-        `Suggested amount: ${parsed.amount} USDC`,
-        `Network: ${parsed.network}`,
-        `Polymarket wallet: ${shortAddress(profile.polymarketAddress)}`,
-        `Deposit address to verify: ${shortAddress(recipient)}`,
-        '',
-        'Open Polymarket, use its official Deposit flow, and confirm the deposit address shown there before sending funds.',
-        'Deposit addresses can differ from your visible Polymarket wallet.',
-        'Do not send more until a small test deposit credits successfully.',
-        '',
-        'After Polymarket credits the deposit, use /poly to check public positions/value.',
-      ]),
-    }
-  }
-
   if (cmd === '/poly' || cmd === '/positions') {
     return formatPolymarketPortfolio(profile)
   }
 
   if (cmd === '/lp') {
-    return formatPolymarketLpScout(trimmed)
+    return createPaidLpRequest(trimmed, profile, config, context)
   }
 
   if (cmd === '/lpmarket') {
-    return formatSinglePolymarketMarket(trimmed)
+    return createPaidLpRequest(trimmed.replace(/^\/lpmarket\b/i, '/lp'), profile, config, context)
   }
 
   if (cmd === '/askpaid') {

@@ -18,8 +18,9 @@ Bot replies include the footer `Built for Photon - Powered by Hash PayLink` to k
 /request 25 USDC for event ticket on solana
 /request 25 USDC for invoice on arbitrum
 /setpoly 0xYourPolymarketWallet
-/fundpoly 25 from base
 /poly
+/lp best
+/answer your-payer-name
 /askpaid What should I build for the 0G hackathon?
 /answer your-payer-name
 /verifyagent marketbot https://api.marketbot.xyz/ask price=2
@@ -40,7 +41,7 @@ Bot replies include the footer `Built for Photon - Powered by Hash PayLink` to k
 
 Send `/setevm` or `/setsol` without an address to open a reply prompt. Then paste only the wallet address and send.
 
-`/clear` removes recent messages sent by the Hash PayLink bot in the current chat. Telegram only lets the bot delete messages it sent, so user messages may remain.
+`/clear` removes tracked messages sent by the Hash PayLink bot for the initiating user in the current chat. Telegram only lets the bot delete messages it sent, so user messages may remain.
 
 ### Command Groups
 
@@ -54,22 +55,33 @@ Base is the default network. Add `on solana` or `on arbitrum` to route a single 
 
 WhatsApp is intentionally limited to one-time Hash PayLink payment requests and tracking. It supports `/request`, `/requests`, `/status`, `/remind`, and `/help`; AI access, agent registration, and StreamPay stay Telegram-only for now.
 
-**Polymarket Funding**
+**Polymarket Watchlist and Paid LP Scout**
 
-Telegram users can save a public Polymarket wallet and create a Hash PayLink funding link:
+Telegram users can save a public Polymarket wallet for read-only portfolio watching:
 
 ```text
 /setpoly 0xYourPolymarketWallet
-/fundpoly 25 from base
 /poly
+```
+
+Polymarket LP Scout is paid access:
+
+```text
 /lp best
 /lp crypto
 /lpmarket polymarket-url-or-slug
+/answer your-payer-name
 ```
 
-`/setpoly` saves the user's public Polymarket wallet for portfolio lookup. `/fundpoly` is an instruction layer, not a payment button: it shows the expected Polymarket deposit address for Base, Arbitrum, or Solana so the user can compare it with Polymarket's official Deposit screen before sending funds. `/poly` reads public Polymarket positions/value for the saved wallet.
+`/setpoly` saves the user's public Polymarket wallet for portfolio lookup. `/poly` reads public Polymarket positions/value for the saved wallet. The bot does not create Polymarket funding links, bridge deposits, or deposit instructions.
 
-`/lp best` scans active Polymarket reward markets from the public CLOB rewards API, checks live order books where token IDs are available, and returns a compact maker-liquidity view: daily rewards, max spread, min size, live spread, suggested YES/NO quote levels, and risk. `/lp crypto` filters the same scan by topic. `/lpmarket` inspects one market URL or slug. These commands are educational product signals only; they do not guarantee fills, rewards, badges, profit, or market outcomes.
+`/lp best` creates a Hash PayLink paid access request. After payment, `/answer <payer-name>` unlocks the scan: active Polymarket reward markets, live order books where token IDs are available, longer-duration scoring, daily rewards, max spread, min size, live spread, suggested YES/NO quote levels, LP execution risk, and outcome risk. `/lp crypto` filters by topic. `/lpmarket` inspects one market URL or slug. These commands are educational product signals only; they do not guarantee fills, rewards, badges, profit, or market outcomes.
+
+Admins can set the LP Scout price from Telegram:
+
+```text
+/setlpprice 1
+```
 
 **AI Paid Access**
 
