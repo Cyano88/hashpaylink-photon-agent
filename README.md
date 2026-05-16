@@ -18,7 +18,7 @@ Bot replies include the footer `Built for Photon - Powered by Hash PayLink` to k
 /request 25 USDC for event ticket on solana
 /request 25 USDC for invoice on arbitrum
 /askpaid 1 USDC What should I build for the 0G hackathon?
-/answer <request-id> <payer-name>
+/answer your-payer-name
 /verifyagent marketbot https://api.marketbot.xyz/ask price=2
 /askagent marketbot Analyze BTC risk this week
 /agents
@@ -52,9 +52,9 @@ WhatsApp is intentionally limited to one-time Hash PayLink payment requests and 
 
 **AI Paid Access**
 
-Use `/askpaid` to create a payment-gated question for the built-in Hash PayLink Circle/Arc Strategy AI endpoint. After the payer completes the PayLink, run `/answer <request-id> <payer-name>` using the payer name entered on the payment page. The bot verifies payment through Hash PayLink's 0G proof endpoint before returning the answer.
+Use `/askpaid` to create a payment-gated question for the built-in Hash PayLink Circle/Arc Strategy AI endpoint. The PayLink is paid to the configured Hash PayLink recipient wallet, not to the caller's wallet. After the payer completes the PayLink, they can run `/answer <payer-name>` or reply `I paid as <payer-name>` using the payer name entered on the payment page. The bot verifies payment through Hash PayLink's 0G proof endpoint before returning the answer.
 
-Use `/verifyagent` to register a public HTTPS agent endpoint. The bot performs a basic endpoint health check and activates the agent if it responds. Users can then call `/askagent <name> <question>` to create a paid access request for that external agent.
+Use `/verifyagent` to register a public HTTPS agent endpoint. The bot performs a basic endpoint health check and activates the agent if it responds. Users can then call `/askagent <name> <question>` to create a paid access request for that external agent. Agent access payments route to the agent owner's saved wallet when available, falling back to the configured default recipient wallet.
 
 **Arc Streaming**
 

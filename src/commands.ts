@@ -422,9 +422,23 @@ function getRecipientForNetwork(profile: UserProfile, config: AppConfig, network
     : profile.evmAddress ?? config.defaultEvmAddress
 }
 
+function getDefaultRecipientForNetwork(config: AppConfig, network: Network) {
+  return network === 'solana' ? config.defaultSolanaAddress : config.defaultEvmAddress
+}
+
+function getAgentOwnerRecipientForNetwork(agent: AgentRegistration, store: ProfileStore, config: AppConfig, network: Network) {
+  const ownerProfile = store.getUser(agent.ownerUserId)
+  return network === 'solana'
+    ? ownerProfile.solanaAddress ?? config.defaultSolanaAddress
+    : ownerProfile.evmAddress ?? config.defaultEvmAddress
+}
+
 function paidAccessPayerHint(request: PaymentRequest) {
   return [
-    'After paying, use the payer name you entered on the payment page:',
+    'After paying, reply with the name you entered on the payment page:',
+    '/answer your-name',
+    '',
+    'Advanced:',
     `/answer ${request.id} your-name`,
   ]
 }
@@ -545,6 +559,88 @@ function findRequest(id: string | undefined, profile: UserProfile) {
     ?? profile.recentRequests?.find(item => item.id === id)
 }
 
+function latestPaidAccessRequest(profile: UserProfile) {
+  const recent = profile.recentAiRequests ?? []
+  return recent.find(request => request.kind === 'ai_access' || request.kind === 'agent_access')
+    ?? (profile.latestRequest?.kind === 'ai_access' || profile.latestRequest?.kind === 'agent_access'
+      ? profile.latestRequest
+      : undefined)
+}
+
+function parseAnswerArgs(text: string, profile: UserProfile): { request?: PaymentRequest; payer?: string; error?: string } {
+  const [, first, ...rest] = text.trim().split(/\s+/)
+  if (!first) return { error: 'After paying, reply with /answer your-name.' }
+
+  const explicitRequest = findRequest(first, profile)
+  if (explicitRequest) {
+    const payer = rest.join(' ').trim()
+    if (!payer) return { error: `Add the payer name. Example: /answer ${explicitRequest.id} Emmanuel` }
+    return { request: explicitRequest, payer }
+  }
+
+  if (first.toUpperCase() === 'REQUEST_ID') {
+    return { error: 'Replace REQUEST_ID with the real request ID, or use the simpler format: /answer your-name.' }
+  }
+  if (/^[a-f0-9]{12,32}$/i.test(first) && rest.length > 0) {
+    return { error: 'That request ID was not found. You can also use the latest paid access request with: /answer your-name.' }
+  }
+
+  const latest = latestPaidAccessRequest(profile)
+  if (!latest) return { error: 'No paid access request found yet. Create one with /askpaid or /askagent first.' }
+  return { request: latest, payer: [first, ...rest].join(' ').trim() }
+}
+
+function parsePaidAs(text: string, profile: UserProfile): { request?: PaymentRequest; payer?: string; error?: string } | undefined {
+  const match = text.trim().match(/^i\s+paid\s+as\s+(.+)$/i)
+  if (!match) return undefined
+  const latest = latestPaidAccessRequest(profile)
+  if (!latest) return { error: 'No paid access request found yet. Create one with /askpaid or /askagent first.' }
+  return { request: latest, payer: match[1].trim() }
+}
+
+async function answerPaidAccessRequest(
+  request: PaymentRequest,
+  payer: string,
+  config: AppConfig,
+  context: CommandContext,
+): Promise<CommandResult> {
+  if (request.kind !== 'ai_access' && request.kind !== 'agent_access') {
+    return { text: 'That request is a normal payment request, not paid AI access.' }
+  }
+
+  if (request.kind === 'agent_access') {
+    const agent = request.agentSlug ? context.store.getAgent(request.agentSlug) : undefined
+    if (!agent || agent.status !== 'active') return { text: 'Agent is no longer active on Hash PayLink.' }
+    const result = await callExternalAgent(agent, request, payer, config)
+    if ('error' in result) return { text: result.error ?? 'Agent access failed.' }
+    return {
+      text: withFooter([
+        'Payment verified on 0G.',
+        `Agent: ${agent.slug}`,
+        '',
+        'Answer:',
+        result.answer ?? '',
+        '',
+        result.proof?.ogExplorer ? `Proof: ${result.proof.ogExplorer}` : 'Proof: 0G verification returned',
+      ]),
+    }
+  }
+
+  const result = await callBuiltInAi(request, payer, config)
+  if ('error' in result) return { text: result.error ?? 'AI access failed.' }
+  return {
+    text: withFooter([
+      'Payment verified on 0G.',
+      'Agent: Hash PayLink Circle/Arc Strategy AI',
+      '',
+      'Answer:',
+      result.answer ?? '',
+      '',
+      result.proof?.ogExplorer ? `Proof: ${result.proof.ogExplorer}` : 'Proof: 0G verification returned',
+    ]),
+  }
+}
+
 function findPendingStream(id: string | undefined, profile: UserProfile) {
   if (!id) return undefined
   return profile.pendingStreams?.find(stream => stream.id === id)
@@ -565,6 +661,11 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
   const cmd = commandName(trimmed)
   const profile = context.store.getUser(context.userId)
   const replyToText = context.replyToText ?? ''
+  const paidAs = parsePaidAs(trimmed, profile)
+  if (paidAs) {
+    if (paidAs.error || !paidAs.request || !paidAs.payer) return { text: paidAs.error ?? 'Use /answer your-name.' }
+    return answerPaidAccessRequest(paidAs.request, paidAs.payer, config, context)
+  }
 
   if (/Paste your EVM recipient address/i.test(replyToText)) {
     if (!isEvmAddress(trimmed)) return promptForEvmRecipient()
@@ -676,16 +777,16 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     const parsed = parsePaidQuestionArgs(trimmed, userNetwork(profile, config))
     if ('error' in parsed) return { text: parsed.error }
 
-    const recipient = getRecipientForNetwork(profile, config, parsed.network)
-    if (!recipient) return parsed.network === 'solana' ? promptForSolanaRecipient() : promptForEvmRecipient()
+    const recipient = getDefaultRecipientForNetwork(config, parsed.network)
+    if (!recipient) return { text: `Paid access recipient is not configured for ${parsed.network}. Ask the Hash PayLink admin to set the default recipient wallet.` }
 
     const request = buildPaymentRequest({
       baseUrl: config.hashPayLinkBaseUrl,
       amount: parsed.amount,
       memo: 'Hash PayLink Circle/Arc AI access',
       network: parsed.network,
-      evmAddress: parsed.network === 'solana' ? profile.evmAddress ?? config.defaultEvmAddress : recipient,
-      solanaAddress: parsed.network === 'solana' ? recipient : profile.solanaAddress ?? config.defaultSolanaAddress,
+      evmAddress: parsed.network === 'solana' ? config.defaultEvmAddress : recipient,
+      solanaAddress: parsed.network === 'solana' ? recipient : config.defaultSolanaAddress,
       returnUrl: config.telegramReturnUrl,
       kind: 'ai_access',
       question: parsed.question,
@@ -717,41 +818,9 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
   }
 
   if (cmd === '/answer') {
-    const [, requestedId, payer] = trimmed.split(/\s+/, 3)
-    if (!requestedId || !payer) return { text: 'Use /answer <request-id> <payer-name>.' }
-    const request = findRequest(requestedId, profile)
-    if (!request) return { text: 'Paid access request not found. Use /requests to see recent requests.' }
-    if (request.kind === 'agent_access') {
-      const agent = request.agentSlug ? context.store.getAgent(request.agentSlug) : undefined
-      if (!agent || agent.status !== 'active') return { text: 'Agent is no longer active on Hash PayLink.' }
-      const result = await callExternalAgent(agent, request, payer, config)
-      if ('error' in result) return { text: result.error ?? 'Agent access failed.' }
-      return {
-        text: withFooter([
-          `Payment verified on 0G.`,
-          `Agent: ${agent.slug}`,
-          '',
-          'Answer:',
-          result.answer ?? '',
-          '',
-          result.proof?.ogExplorer ? `Proof: ${result.proof.ogExplorer}` : 'Proof: 0G verification returned',
-        ]),
-      }
-    }
-
-    const result = await callBuiltInAi(request, payer, config)
-    if ('error' in result) return { text: result.error ?? 'AI access failed.' }
-    return {
-      text: withFooter([
-        'Payment verified on 0G.',
-        'Agent: Hash PayLink Circle/Arc Strategy AI',
-        '',
-        'Answer:',
-        result.answer ?? '',
-        '',
-        result.proof?.ogExplorer ? `Proof: ${result.proof.ogExplorer}` : 'Proof: 0G verification returned',
-      ]),
-    }
+    const parsed = parseAnswerArgs(trimmed, profile)
+    if (parsed.error || !parsed.request || !parsed.payer) return { text: parsed.error ?? 'Use /answer your-name.' }
+    return answerPaidAccessRequest(parsed.request, parsed.payer, config, context)
   }
 
   if (cmd === '/verifyagent') {
@@ -807,15 +876,15 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     if (question.length > MAX_QUESTION_LENGTH) return { text: `Question is too long. Keep it under ${MAX_QUESTION_LENGTH} characters.` }
 
     const network = userNetwork(profile, config)
-    const recipient = getRecipientForNetwork(profile, config, network)
-    if (!recipient) return network === 'solana' ? promptForSolanaRecipient() : promptForEvmRecipient()
+    const recipient = getAgentOwnerRecipientForNetwork(agent, context.store, config, network)
+    if (!recipient) return { text: `Agent "${slug}" has no recipient wallet configured for ${network}. Ask the agent owner to set their wallet.` }
     const request = buildPaymentRequest({
       baseUrl: config.hashPayLinkBaseUrl,
       amount: agent.priceUsdc,
       memo: `Agent access: ${agent.slug}`,
       network,
-      evmAddress: network === 'solana' ? profile.evmAddress ?? config.defaultEvmAddress : recipient,
-      solanaAddress: network === 'solana' ? recipient : profile.solanaAddress ?? config.defaultSolanaAddress,
+      evmAddress: network === 'solana' ? config.defaultEvmAddress : recipient,
+      solanaAddress: network === 'solana' ? recipient : config.defaultSolanaAddress,
       returnUrl: config.telegramReturnUrl,
       kind: 'agent_access',
       question,
