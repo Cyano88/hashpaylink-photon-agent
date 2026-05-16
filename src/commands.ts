@@ -156,6 +156,9 @@ type PolymarketLpOpportunity = {
   title: string
   slug?: string
   tokenId?: string
+  endDate?: string
+  daysToResolve?: number
+  oneDayPriceChange?: number
   dailyReward?: number
   maxSpread?: number
   minSize?: number
@@ -167,7 +170,8 @@ type PolymarketLpOpportunity = {
   suggestedYesBid?: number
   suggestedNoBid?: number
   eligible?: boolean
-  risk: 'low' | 'medium' | 'high'
+  lpExecutionRisk: 'low' | 'medium' | 'high'
+  outcomeRisk: 'medium' | 'high'
   score: number
 }
 
@@ -685,6 +689,21 @@ function formatOptionalUsdc(value: number | undefined) {
   return typeof value === 'number' && Number.isFinite(value) ? `${formatUsdc(value)} USDC` : 'n/a'
 }
 
+function daysUntil(rawDate: string | undefined) {
+  if (!rawDate) return undefined
+  const date = new Date(rawDate)
+  const timestamp = date.getTime()
+  if (!Number.isFinite(timestamp)) return undefined
+  return Math.max(0, Math.ceil((timestamp - Date.now()) / 86_400_000))
+}
+
+function formatDays(value: number | undefined) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 'unknown'
+  if (value === 0) return 'today'
+  if (value === 1) return '1 day'
+  return `${value} days`
+}
+
 function extractPolymarketSlug(raw: string) {
   const value = raw.trim()
   if (!value) return ''
@@ -785,16 +804,21 @@ function baseLpOpportunity(market: PolymarketRewardMarket): PolymarketLpOpportun
     readNumber(market, ['min_size', 'minSize', 'rewards_min_size', 'rewardsMinSize']) ??
     readNestedNumber(market, [['reward_config', 'min_size'], ['rewardConfig', 'minSize']])
   const liquidity = readNumber(market, ['liquidity', 'volume_24hr', 'volume24hr', 'volume', 'oneDayVolume'])
+  const endDate = readString(market, ['end_date', 'endDate', 'resolution_date', 'resolutionDate', 'closed_time'])
 
   return {
     title,
     slug: readString(market, ['slug', 'market_slug', 'event_slug']),
     tokenId: extractPolymarketTokenIds(market)[0],
+    endDate,
+    daysToResolve: daysUntil(endDate),
+    oneDayPriceChange: readNumber(market, ['one_day_price_change', 'oneDayPriceChange', 'price_change_24h', 'priceChange24h']),
     dailyReward,
     maxSpread,
     minSize,
     liquidity,
-    risk: 'medium',
+    lpExecutionRisk: 'medium',
+    outcomeRisk: 'high',
     score: 0,
   }
 }
@@ -809,18 +833,25 @@ async function analyzePolymarketLpMarket(market: PolymarketRewardMarket): Promis
   const suggestedNoBid = typeof midpoint === 'number' ? clampPrice((1 - midpoint) - offset) : undefined
   const eligible = typeof spread === 'number' && typeof opportunity.maxSpread === 'number' ? spread <= opportunity.maxSpread : undefined
 
-  let risk: PolymarketLpOpportunity['risk'] = 'medium'
-  if (typeof midpoint === 'number' && (midpoint < 0.08 || midpoint > 0.92)) risk = 'high'
-  if (typeof spread === 'number' && typeof opportunity.maxSpread === 'number' && spread > opportunity.maxSpread) risk = 'high'
-  if (risk !== 'high' && typeof spread === 'number' && spread <= 0.02 && typeof midpoint === 'number' && midpoint > 0.15 && midpoint < 0.85) {
-    risk = 'low'
+  let lpExecutionRisk: PolymarketLpOpportunity['lpExecutionRisk'] = 'medium'
+  if (typeof midpoint === 'number' && (midpoint < 0.08 || midpoint > 0.92)) lpExecutionRisk = 'high'
+  if (typeof spread === 'number' && typeof opportunity.maxSpread === 'number' && spread > opportunity.maxSpread) lpExecutionRisk = 'high'
+  if (typeof opportunity.oneDayPriceChange === 'number' && Math.abs(opportunity.oneDayPriceChange) > 0.08) lpExecutionRisk = 'high'
+  if (lpExecutionRisk !== 'high' && typeof spread === 'number' && spread <= 0.02 && typeof midpoint === 'number' && midpoint > 0.15 && midpoint < 0.85) {
+    lpExecutionRisk = 'low'
   }
+  const outcomeRisk: PolymarketLpOpportunity['outcomeRisk'] = 'high'
 
-  const rewardScore = opportunity.dailyReward ?? 0
+  const rewardScore = Math.min(150, opportunity.dailyReward ?? 0)
   const liquidityScore = Math.min(500, opportunity.liquidity ?? 0) / 25
   const eligibilityScore = eligible === false ? -50 : eligible === true ? 25 : 0
+  const durationScore = typeof opportunity.daysToResolve === 'number'
+    ? Math.min(35, Math.max(-60, opportunity.daysToResolve - 7))
+    : 0
+  const nearResolutionPenalty = typeof opportunity.daysToResolve === 'number' && opportunity.daysToResolve < 7 ? 75 : 0
+  const volatilityPenalty = typeof opportunity.oneDayPriceChange === 'number' ? Math.min(60, Math.abs(opportunity.oneDayPriceChange) * 400) : 8
   const spreadPenalty = typeof spread === 'number' ? spread * 100 : 8
-  const riskPenalty = risk === 'high' ? 30 : risk === 'medium' ? 10 : 0
+  const riskPenalty = lpExecutionRisk === 'high' ? 30 : lpExecutionRisk === 'medium' ? 10 : 0
 
   return {
     ...opportunity,
@@ -829,8 +860,9 @@ async function analyzePolymarketLpMarket(market: PolymarketRewardMarket): Promis
     suggestedYesBid,
     suggestedNoBid,
     eligible,
-    risk,
-    score: rewardScore + liquidityScore + eligibilityScore - spreadPenalty - riskPenalty,
+    lpExecutionRisk,
+    outcomeRisk,
+    score: rewardScore + liquidityScore + eligibilityScore + durationScore - spreadPenalty - riskPenalty - volatilityPenalty - nearResolutionPenalty,
   }
 }
 
@@ -839,8 +871,10 @@ function formatLpOpportunity(opportunity: PolymarketLpOpportunity, index?: numbe
   return [
     `${prefix}${opportunity.title.slice(0, 90)}`,
     `Reward/day: ${formatOptionalUsdc(opportunity.dailyReward)} | Max spread: ${formatCents(opportunity.maxSpread)} | Min size: ${formatOptionalUsdc(opportunity.minSize)}`,
+    `Time to resolve: ${formatDays(opportunity.daysToResolve)} | 24h move: ${formatCents(opportunity.oneDayPriceChange)}`,
     `Book: bid ${formatCents(opportunity.bestBid)} / ask ${formatCents(opportunity.bestAsk)} | live spread ${formatCents(opportunity.spread)}`,
-    `Suggested maker quote: YES ${formatCents(opportunity.suggestedYesBid)} / NO ${formatCents(opportunity.suggestedNoBid)} | risk: ${opportunity.risk}`,
+    `Suggested maker quote: YES ${formatCents(opportunity.suggestedYesBid)} / NO ${formatCents(opportunity.suggestedNoBid)}`,
+    `LP execution risk: ${opportunity.lpExecutionRisk} | Outcome risk: ${opportunity.outcomeRisk}`,
     `Reward check: ${opportunity.eligible === true ? 'inside reward spread' : opportunity.eligible === false ? 'outside reward spread' : 'needs live book review'}`,
     opportunity.slug ? `Market: https://polymarket.com/market/${opportunity.slug}` : undefined,
   ].filter((line): line is string => Boolean(line))
@@ -871,7 +905,8 @@ async function formatPolymarketLpScout(rawQuery: string): Promise<CommandResult>
     text: withFooter([
       'Polymarket LP Scout',
       '',
-      'Educational signal only. Rewards, fills, and market outcomes are not guaranteed.',
+      'Educational signal only. It prioritizes longer-running reward markets with tighter spreads and lower short-term volatility.',
+      'Outcome risk is always high: this is not a safe bet or a prediction.',
       '',
       ...ranked.flatMap((opportunity, index) => [
         ...formatLpOpportunity(opportunity, index + 1),
