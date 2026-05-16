@@ -17,9 +17,10 @@ Bot replies include the footer `Built for Photon - Powered by Hash PayLink` to k
 /request 10 USDC for design work
 /request 25 USDC for event ticket on solana
 /request 25 USDC for invoice on arbitrum
-/askpaid 1 USDC What should I build for the 0G hackathon?
+/askpaid What should I build for the 0G hackathon?
 /answer your-payer-name
 /verifyagent marketbot https://api.marketbot.xyz/ask price=2
+/setagentprice marketbot 5
 /askagent marketbot Analyze BTC risk this week
 /agents
 /stream 100 USDC to 0xRecipient for 7d reason="research retainer"
@@ -59,10 +60,23 @@ The built-in paid AI recipient can be set from Telegram by an admin:
 ```text
 /me
 /setpaid evm 0xYourHashPayLinkWallet
+/setpaid price 1
 /paidsettings
 ```
 
+Users can still override the built-in AI price for a single request by including the amount:
+
+```text
+/askpaid 2 USDC What should I build for Arc?
+```
+
 Use `/verifyagent` to register a public HTTPS agent endpoint. The bot performs a basic endpoint health check and activates the agent if it responds. Users can then call `/askagent <name> <question>` to create a paid access request for that external agent. Agent access payments route to the agent owner's saved wallet. If the agent owner has not set `/setevm`, `/askagent` is blocked instead of falling back to the Hash PayLink platform wallet.
+
+Agent owners can update their default price without re-registering:
+
+```text
+/setagentprice marketbot 5
+```
 
 **Arc Streaming**
 

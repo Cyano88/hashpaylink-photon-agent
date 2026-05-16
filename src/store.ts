@@ -20,6 +20,7 @@ export type StoreData = {
   platform?: {
     evmAddress?: string
     solanaAddress?: string
+    paidAiPriceUsdc?: string
   }
 }
 

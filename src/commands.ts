@@ -56,8 +56,9 @@ const HELP_LINES = [
   '/requests',
   '',
   'AI Paid Access',
-  '/askpaid 1 USDC your question',
+  '/askpaid your question',
   '/verifyagent name https://agent.example/ask price=2',
+  '/setagentprice name 2',
   '/askagent name your question',
   '/agents',
   '',
@@ -72,6 +73,7 @@ const HELP_LINES = [
   '/setsol YourSolanaAddress',
   '/network solana',
   '/setpaid evm 0xHashPayLinkWallet',
+  '/setpaid price 1',
   '/paidsettings',
   '/me',
   '/clear',
@@ -175,16 +177,13 @@ function parseRequestArgs(text: string, fallbackNetwork: Network): ParsedRequest
 
 function parsePaidQuestionArgs(text: string, fallbackNetwork: Network): ParsedPaidQuestionArgs {
   const parts = text.trim().split(/\s+/)
-  const amount = parseUsdcAmount(parts[1])
-  if (!amount) {
-    return { error: 'Use /askpaid 1 USDC your question. Amounts must use up to 6 decimals.' }
-  }
-
   const network = extractNetworkOverride(parts, fallbackNetwork)
 
-  const questionStart = parts[2]?.toLowerCase() === 'usdc' ? 3 : 2
+  const explicitAmount = parseUsdcAmount(parts[1])
+  const amount = explicitAmount ?? ''
+  const questionStart = explicitAmount ? (parts[2]?.toLowerCase() === 'usdc' ? 3 : 2) : 1
   const question = parts.slice(questionStart).join(' ').trim()
-  if (!question) return { error: 'Add the question after the price. Example: /askpaid 1 USDC What should I build?' }
+  if (!question) return { error: 'Add a question. Example: /askpaid What should I build on Arc?' }
   if (question.length > MAX_QUESTION_LENGTH) return { error: `Question is too long. Keep it under ${MAX_QUESTION_LENGTH} characters.` }
   return { amount, question, network }
 }
@@ -620,10 +619,12 @@ function paidSettingsText(store: ProfileStore, config: AppConfig) {
     '',
     `EVM: ${shortAddress(platform.evmAddress ?? config.defaultEvmAddress)}`,
     `Solana: ${shortAddress(platform.solanaAddress ?? config.defaultSolanaAddress)}`,
+    `Default price: ${platform.paidAiPriceUsdc ?? 'not set'} USDC`,
     '',
     'Set from Telegram:',
     '/setpaid evm 0xYourWallet',
     '/setpaid solana YourSolanaWallet',
+    '/setpaid price 1',
   ])
 }
 
@@ -738,6 +739,12 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     if (!isAdmin(config, context.userId)) return { text: adminRequiredText() }
     const [, chainRaw, address] = trimmed.split(/\s+/, 3)
     const chain = chainRaw?.toLowerCase()
+    if (chain === 'price') {
+      const amount = parseUsdcAmount(address)
+      if (!amount) return { text: 'Use /setpaid price 1. Amounts must use up to 6 decimals.' }
+      await context.store.updatePlatform({ paidAiPriceUsdc: amount })
+      return { text: withFooter([`Built-in paid AI default price saved: ${amount} USDC`]) }
+    }
     if (chain === 'evm' || chain === 'base' || chain === 'arbitrum') {
       if (!address || !isEvmAddress(address)) return { text: 'Use /setpaid evm 0xYourHashPayLinkWallet.' }
       await context.store.updatePlatform({ evmAddress: address })
@@ -748,7 +755,7 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
       await context.store.updatePlatform({ solanaAddress: address })
       return { text: withFooter([`Built-in paid AI Solana recipient saved: ${shortAddress(address)}`]) }
     }
-    return { text: 'Use /setpaid evm 0xYourWallet or /setpaid solana YourSolanaWallet.' }
+    return { text: 'Use /setpaid evm 0xYourWallet, /setpaid solana YourSolanaWallet, or /setpaid price 1.' }
   }
 
   if (cmd === '/paidsettings') {
@@ -831,10 +838,12 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
 
     const recipient = getPlatformRecipientForNetwork(context.store, config, parsed.network)
     if (!recipient) return { text: `Paid access recipient is not configured for ${parsed.network}. Ask the Hash PayLink admin to set the default recipient wallet.` }
+    const amount = parsed.amount || context.store.getPlatform().paidAiPriceUsdc
+    if (!amount) return { text: 'Built-in paid AI default price is not set. Ask the Hash PayLink admin to run /setpaid price 1, or include a price like /askpaid 1 USDC your question.' }
 
     const request = buildPaymentRequest({
       baseUrl: config.hashPayLinkBaseUrl,
-      amount: parsed.amount,
+      amount,
       memo: 'Hash PayLink Circle/Arc AI access',
       network: parsed.network,
       evmAddress: parsed.network === 'solana' ? context.store.getPlatform().evmAddress ?? config.defaultEvmAddress : recipient,
@@ -896,6 +905,26 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
         '',
         `Users can now call:`,
         `/askagent ${verified.slug} your question`,
+      ]),
+    }
+  }
+
+  if (cmd === '/setagentprice') {
+    const parts = trimmed.split(/\s+/)
+    const slug = normalizeAgentSlug(parts[1])
+    const priceUsdc = parseUsdcAmount(parts[2])
+    if (!slug || !priceUsdc) return { text: 'Use /setagentprice agent-name 2.' }
+    const agent = context.store.getAgent(slug)
+    if (!agent) return { text: `Agent "${slug}" is not registered on Hash PayLink.` }
+    if (agent.ownerUserId !== context.userId) return { text: `Only the owner of "${slug}" can update its default price.` }
+    const updated = { ...agent, priceUsdc }
+    await context.store.upsertAgent(updated)
+    return {
+      text: withFooter([
+        'Agent default price updated.',
+        '',
+        `Name: ${updated.slug}`,
+        `Price: ${updated.priceUsdc} USDC`,
       ]),
     }
   }
