@@ -54,7 +54,15 @@ WhatsApp is intentionally limited to one-time Hash PayLink payment requests and 
 
 Use `/askpaid` to create a payment-gated question for the built-in Hash PayLink Circle/Arc Strategy AI endpoint. The PayLink is paid to the configured Hash PayLink recipient wallet, not to the caller's wallet. After the payer completes the PayLink, they can run `/answer <payer-name>` or reply `I paid as <payer-name>` using the payer name entered on the payment page. The bot verifies payment through Hash PayLink's 0G proof endpoint before returning the answer.
 
-Use `/verifyagent` to register a public HTTPS agent endpoint. The bot performs a basic endpoint health check and activates the agent if it responds. Users can then call `/askagent <name> <question>` to create a paid access request for that external agent. Agent access payments route to the agent owner's saved wallet when available, falling back to the configured default recipient wallet.
+The built-in paid AI recipient can be set from Telegram by an admin:
+
+```text
+/me
+/setpaid evm 0xYourHashPayLinkWallet
+/paidsettings
+```
+
+Use `/verifyagent` to register a public HTTPS agent endpoint. The bot performs a basic endpoint health check and activates the agent if it responds. Users can then call `/askagent <name> <question>` to create a paid access request for that external agent. Agent access payments route to the agent owner's saved wallet. If the agent owner has not set `/setevm`, `/askagent` is blocked instead of falling back to the Hash PayLink platform wallet.
 
 **Arc Streaming**
 
@@ -70,6 +78,7 @@ TELEGRAM_ENABLED=true
 TELEGRAM_BOT_TOKEN=
 PHOTON_PROJECT_ID=
 PHOTON_SECRET_KEY=
+ADMIN_USER_IDS=
 DEFAULT_EVM_ADDRESS=
 DEFAULT_SOLANA_ADDRESS=
 DEFAULT_NETWORK=base
@@ -85,7 +94,9 @@ WHATSAPP_GRAPH_VERSION=v20.0
 PORT=3000
 ```
 
-`DEFAULT_EVM_ADDRESS` and `DEFAULT_SOLANA_ADDRESS` are optional fallback addresses. Public users should save their own recipient addresses in Telegram:
+`ADMIN_USER_IDS` is a comma-separated list of Telegram user IDs allowed to run `/setpaid` and `/paidsettings`. Send `/me` to the bot to see your Telegram user ID.
+
+`DEFAULT_EVM_ADDRESS` and `DEFAULT_SOLANA_ADDRESS` are optional bootstrap fallback addresses. The built-in paid AI recipient can be updated from Telegram with `/setpaid`. Public users should save their own recipient addresses in Telegram for normal payment requests:
 
 ```text
 /setevm 0xYourAddress

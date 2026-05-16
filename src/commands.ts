@@ -71,6 +71,8 @@ const HELP_LINES = [
   '/setevm 0xYourAddress',
   '/setsol YourSolanaAddress',
   '/network solana',
+  '/setpaid evm 0xHashPayLinkWallet',
+  '/paidsettings',
   '/me',
   '/clear',
 ]
@@ -422,15 +424,16 @@ function getRecipientForNetwork(profile: UserProfile, config: AppConfig, network
     : profile.evmAddress ?? config.defaultEvmAddress
 }
 
-function getDefaultRecipientForNetwork(config: AppConfig, network: Network) {
-  return network === 'solana' ? config.defaultSolanaAddress : config.defaultEvmAddress
+function getPlatformRecipientForNetwork(store: ProfileStore, config: AppConfig, network: Network) {
+  const platform = store.getPlatform()
+  return network === 'solana'
+    ? platform.solanaAddress ?? config.defaultSolanaAddress
+    : platform.evmAddress ?? config.defaultEvmAddress
 }
 
 function getAgentOwnerRecipientForNetwork(agent: AgentRegistration, store: ProfileStore, config: AppConfig, network: Network) {
   const ownerProfile = store.getUser(agent.ownerUserId)
-  return network === 'solana'
-    ? ownerProfile.solanaAddress ?? config.defaultSolanaAddress
-    : ownerProfile.evmAddress ?? config.defaultEvmAddress
+  return network === 'solana' ? ownerProfile.solanaAddress : ownerProfile.evmAddress
 }
 
 function paidAccessPayerHint(request: PaymentRequest) {
@@ -598,6 +601,32 @@ function parsePaidAs(text: string, profile: UserProfile): { request?: PaymentReq
   return { request: latest, payer: match[1].trim() }
 }
 
+function isAdmin(config: AppConfig, userId: string) {
+  return config.adminUserIds.includes(userId)
+}
+
+function adminRequiredText() {
+  return withFooter([
+    'Only a Hash PayLink admin can update the built-in paid AI recipient.',
+    '',
+    'Send /me to see your Telegram user ID, then add it to ADMIN_USER_IDS on the Photon agent service.',
+  ])
+}
+
+function paidSettingsText(store: ProfileStore, config: AppConfig) {
+  const platform = store.getPlatform()
+  return withFooter([
+    'Built-in paid AI recipient settings',
+    '',
+    `EVM: ${shortAddress(platform.evmAddress ?? config.defaultEvmAddress)}`,
+    `Solana: ${shortAddress(platform.solanaAddress ?? config.defaultSolanaAddress)}`,
+    '',
+    'Set from Telegram:',
+    '/setpaid evm 0xYourWallet',
+    '/setpaid solana YourSolanaWallet',
+  ])
+}
+
 async function answerPaidAccessRequest(
   request: PaymentRequest,
   payer: string,
@@ -705,6 +734,28 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     return { text: withFooter([`Solana recipient saved: ${shortAddress(address)}`]) }
   }
 
+  if (cmd === '/setpaid') {
+    if (!isAdmin(config, context.userId)) return { text: adminRequiredText() }
+    const [, chainRaw, address] = trimmed.split(/\s+/, 3)
+    const chain = chainRaw?.toLowerCase()
+    if (chain === 'evm' || chain === 'base' || chain === 'arbitrum') {
+      if (!address || !isEvmAddress(address)) return { text: 'Use /setpaid evm 0xYourHashPayLinkWallet.' }
+      await context.store.updatePlatform({ evmAddress: address })
+      return { text: withFooter([`Built-in paid AI EVM recipient saved: ${shortAddress(address)}`]) }
+    }
+    if (chain === 'solana' || chain === 'sol') {
+      if (!address || !isLikelySolanaAddress(address)) return { text: 'Use /setpaid solana YourSolanaWallet.' }
+      await context.store.updatePlatform({ solanaAddress: address })
+      return { text: withFooter([`Built-in paid AI Solana recipient saved: ${shortAddress(address)}`]) }
+    }
+    return { text: 'Use /setpaid evm 0xYourWallet or /setpaid solana YourSolanaWallet.' }
+  }
+
+  if (cmd === '/paidsettings') {
+    if (!isAdmin(config, context.userId)) return { text: adminRequiredText() }
+    return { text: paidSettingsText(context.store, config) }
+  }
+
   if (cmd === '/network') {
     const rawNetwork = trimmed.split(/\s+/)[1]
     if (!rawNetwork) {
@@ -732,6 +783,7 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
       text: withFooter([
         'Your Hash PayLink settings',
         '',
+        `Telegram user ID: ${context.userId}`,
         `EVM: ${shortAddress(profile.evmAddress)}`,
         `Solana: ${shortAddress(profile.solanaAddress)}`,
         `Default network: ${userNetwork(profile, config)}`,
@@ -777,7 +829,7 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     const parsed = parsePaidQuestionArgs(trimmed, userNetwork(profile, config))
     if ('error' in parsed) return { text: parsed.error }
 
-    const recipient = getDefaultRecipientForNetwork(config, parsed.network)
+    const recipient = getPlatformRecipientForNetwork(context.store, config, parsed.network)
     if (!recipient) return { text: `Paid access recipient is not configured for ${parsed.network}. Ask the Hash PayLink admin to set the default recipient wallet.` }
 
     const request = buildPaymentRequest({
@@ -785,8 +837,8 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
       amount: parsed.amount,
       memo: 'Hash PayLink Circle/Arc AI access',
       network: parsed.network,
-      evmAddress: parsed.network === 'solana' ? config.defaultEvmAddress : recipient,
-      solanaAddress: parsed.network === 'solana' ? recipient : config.defaultSolanaAddress,
+      evmAddress: parsed.network === 'solana' ? context.store.getPlatform().evmAddress ?? config.defaultEvmAddress : recipient,
+      solanaAddress: parsed.network === 'solana' ? recipient : context.store.getPlatform().solanaAddress ?? config.defaultSolanaAddress,
       returnUrl: config.telegramReturnUrl,
       kind: 'ai_access',
       question: parsed.question,

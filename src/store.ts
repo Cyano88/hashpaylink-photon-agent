@@ -17,6 +17,10 @@ export type UserProfile = {
 export type StoreData = {
   users: Record<string, UserProfile>
   agents?: Record<string, AgentRegistration>
+  platform?: {
+    evmAddress?: string
+    solanaAddress?: string
+  }
 }
 
 const DEFAULT_DATA: StoreData = { users: {} }
@@ -45,6 +49,16 @@ export class ProfileStore {
 
   listAgents() {
     return Object.values(this.data.agents ?? {})
+  }
+
+  getPlatform() {
+    return this.data.platform ?? {}
+  }
+
+  async updatePlatform(patch: StoreData['platform']) {
+    this.data.platform = { ...(this.data.platform ?? {}), ...patch }
+    await this.save()
+    return this.data.platform
   }
 
   async upsertAgent(agent: AgentRegistration) {
