@@ -67,7 +67,7 @@ Telegram users can save a public Polymarket wallet and create a Hash PayLink fun
 /lpmarket polymarket-url-or-slug
 ```
 
-`/setpoly` calls Polymarket's Bridge API to generate deposit addresses for the user's Polymarket wallet. `/fundpoly` opens a normal Hash PayLink payer page that sends USDC to the Polymarket bridge deposit address from Base, Arbitrum, or Solana. `/status` verifies the Hash PayLink payment, and `/poly` reads public Polymarket positions/value for the saved wallet.
+`/setpoly` saves the user's public Polymarket wallet for portfolio lookup. `/fundpoly` is an instruction layer, not a payment button: it shows the expected Polymarket deposit address for Base, Arbitrum, or Solana so the user can compare it with Polymarket's official Deposit screen before sending funds. `/poly` reads public Polymarket positions/value for the saved wallet.
 
 `/lp best` scans active Polymarket reward markets from the public CLOB rewards API, checks live order books where token IDs are available, and returns a compact maker-liquidity view: daily rewards, max spread, min size, live spread, suggested YES/NO quote levels, and risk. `/lp crypto` filters the same scan by topic. `/lpmarket` inspects one market URL or slug. These commands are educational product signals only; they do not guarantee fills, rewards, badges, profit, or market outcomes.
 

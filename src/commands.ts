@@ -1379,34 +1379,21 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
       return { text: 'Polymarket EVM funding address is invalid. Try again shortly.' }
     }
 
-    const request = buildPaymentRequest({
-      baseUrl: config.hashPayLinkBaseUrl,
-      amount: parsed.amount,
-      memo: 'Polymarket account funding',
-      network: parsed.network,
-      evmAddress: parsed.network === 'solana' ? config.defaultEvmAddress : recipient,
-      solanaAddress: parsed.network === 'solana' ? recipient : config.defaultSolanaAddress,
-      returnUrl: config.telegramReturnUrl,
-    })
-    requests.set(request.id, request)
-    latestRequestByUser.set(context.userId, request.id)
-    await context.store.updateUser(context.userId, {
-      latestRequest: request,
-      recentRequests: [request, ...(profile.recentRequests ?? [])].slice(0, 5),
-    })
     return {
       text: withFooter([
-        'Polymarket funding link created',
+        'Polymarket funding guide',
         '',
-        `${request.amount} USDC`,
-        `From: ${request.network}`,
+        `Suggested amount: ${parsed.amount} USDC`,
+        `Network: ${parsed.network}`,
         `Polymarket wallet: ${shortAddress(profile.polymarketAddress)}`,
-        `Bridge deposit address: ${shortAddress(recipient)}`,
+        `Deposit address to verify: ${shortAddress(recipient)}`,
         '',
-        'Pay the link, then use /status to verify the Hash PayLink payment.',
-        'After the bridge credits Polymarket, use /poly to check public positions/value.',
+        'Open Polymarket, use its official Deposit flow, and confirm the deposit address shown there before sending funds.',
+        'Deposit addresses can differ from your visible Polymarket wallet.',
+        'Do not send more until a small test deposit credits successfully.',
+        '',
+        'After Polymarket credits the deposit, use /poly to check public positions/value.',
       ]),
-      buttons: requestButtons(request),
     }
   }
 
