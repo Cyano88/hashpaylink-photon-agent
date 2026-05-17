@@ -1418,7 +1418,7 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     return formatPolymarketPortfolio(profile)
   }
 
-  if (cmd === '/setemail') {
+  if (cmd === '/setemail' || cmd === '/setmail') {
     const email = trimmed.split(/\s+/)[1]?.toLowerCase()
     if (!email || !isEmail(email)) {
       return {
