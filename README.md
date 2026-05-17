@@ -87,7 +87,7 @@ Users can also opt into email risk alerts for public Polymarket positions:
 /polyalerts off
 ```
 
-When enabled, the bot scans the saved public Polymarket wallet and sends an email if any open position is at or below `-30%` PnL. Alerts are rate-limited per position to once every 24 hours. The email tells the user to review the position directly on Polymarket; it is a monitoring notice, not trading or financial advice.
+When enabled, the bot scans the saved public Polymarket wallet and sends an email if any unresolved open position is at or below `-30%` PnL. Ended, closed, resolved, or expired markets are skipped for downside alerts. The bot also sends a separate once-per-position notice when public portfolio data shows a resolved positive/winning position. Alert emails use clean HTML links such as `View Polymarket event`, with a plain-text URL fallback for email clients that do not render HTML. Alerts are rate-limited per position to once every 24 hours. The email tells the user to review the position directly on Polymarket; it is a monitoring notice, not trading or financial advice.
 
 `/lp best` creates a Hash PayLink paid access request. After payment, `/answer <payer-name>` unlocks the scan: active Polymarket reward markets, live order books where token IDs are available, longer-duration scoring, daily rewards, max spread, min size, live spread, suggested YES/NO quote levels, LP execution risk, and outcome risk. `/lp crypto` filters by topic. `/lpmarket` inspects one market URL or slug. These commands are educational product signals only; they do not guarantee fills, rewards, badges, profit, or market outcomes.
 

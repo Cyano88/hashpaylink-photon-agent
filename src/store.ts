@@ -10,6 +10,7 @@ export type UserProfile = {
   polymarketEmailAlertsEnabled?: boolean
   polymarketAlertThresholdPercent?: number
   polymarketAlertLastSentByPosition?: Record<string, number>
+  polymarketSettlementLastSentByPosition?: Record<string, number>
   polymarketAlertLastCheckedAt?: number
   defaultNetwork?: 'base' | 'arbitrum' | 'solana'
   latestRequest?: PaymentRequest

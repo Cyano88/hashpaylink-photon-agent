@@ -1464,7 +1464,8 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
           'Polymarket email alerts enabled.',
           '',
           `Email: ${profile.email}`,
-          'Trigger: any open position at or below -30% PnL.',
+          'Trigger: any unresolved open position at or below -30% PnL.',
+          'Resolved winning positions can also send a notice.',
           '',
           'Run /polyalerts check to test the watcher now.',
         ]),
@@ -1477,13 +1478,14 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     if (action === 'check') {
       const checked = await checkPolymarketRisk(profile)
       if (!checked.ok) return { text: checked.error ?? 'Could not check Polymarket alerts right now.' }
-      if (!checked.alerts.length) {
+      if (!checked.alerts.length && !checked.settlements.length) {
         await context.store.updateUser(context.userId, { polymarketAlertLastCheckedAt: Date.now() })
         return {
           text: withFooter([
             'Polymarket alert check complete.',
             '',
-            'No open positions are currently at or below -30% PnL.',
+            'No unresolved open positions are currently at or below -30% PnL.',
+            'No resolved winning positions were detected.',
           ]),
         }
       }
@@ -1498,14 +1500,20 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
             `${index + 1}. ${alert.title.slice(0, 80)}`,
             `${alert.outcome} - PnL ${alert.percentPnl.toFixed(2)}%`,
           ]),
+          checked.settlements.length ? '' : undefined,
+          checked.settlements.length ? `Resolved winning positions: ${checked.settlements.length}` : undefined,
+          ...checked.settlements.slice(0, 5).flatMap((alert, index) => [
+            `${index + 1}. ${alert.title.slice(0, 80)}`,
+            `${alert.outcome}${typeof alert.percentPnl === 'number' ? ` - PnL ${alert.percentPnl.toFixed(2)}%` : ''}`,
+          ]),
           '',
           'Email result:',
           'error' in delivery
             ? delivery.error
             : delivery.sent > 0
-              ? `Sent ${delivery.sent} email alert${delivery.sent === 1 ? '' : 's'}.`
+              ? `Sent ${delivery.sent} email message${delivery.sent === 1 ? '' : 's'}.`
               : 'No email sent. Alerts may be disabled, email may be missing, or the 24h alert cooldown is active.',
-        ]),
+        ].filter((line): line is string => typeof line === 'string')),
       }
     }
     return { text: 'Use /polyalerts on, /polyalerts off, /polyalerts status, or /polyalerts check.' }

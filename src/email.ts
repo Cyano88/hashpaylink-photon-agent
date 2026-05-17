@@ -4,6 +4,7 @@ export type EmailMessage = {
   to: string
   subject: string
   text: string
+  html?: string
 }
 
 export function emailDeliveryReady(config: AppConfig) {
@@ -31,6 +32,10 @@ export async function sendEmail(config: AppConfig, message: EmailMessage) {
         type: 'text/plain',
         value: message.text,
       },
+      ...(message.html ? [{
+        type: 'text/html',
+        value: message.html,
+      }] : []),
     ],
   }
   if (config.alertReplyToEmail) body.reply_to = { email: config.alertReplyToEmail }
