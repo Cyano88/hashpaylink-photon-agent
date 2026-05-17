@@ -1,4 +1,5 @@
 import type { AppConfig, Network } from './config.js'
+import { checkPolymarketRisk, formatPolymarketAlertStatus, sendDuePolymarketAlerts } from './polymarketAlerts.js'
 import {
   buildPaymentRequest,
   buildPendingStreamRequest,
@@ -58,6 +59,9 @@ const HELP_LINES = [
   'Polymarket Watchlist',
   '/setpoly 0xYourPolymarketWallet',
   '/poly',
+  '/setemail you@example.com',
+  '/polyalerts on',
+  '/polyalerts check',
   '',
   'Paid Polymarket LP Scout',
   '/lp best',
@@ -1370,6 +1374,7 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
         `EVM: ${shortAddress(profile.evmAddress)}`,
         `Solana: ${shortAddress(profile.solanaAddress)}`,
         `Polymarket: ${shortAddress(profile.polymarketAddress)}`,
+        `Email alerts: ${profile.polymarketEmailAlertsEnabled ? profile.email ?? 'on, email missing' : 'off'}`,
         `Default network: ${userNetwork(profile, config)}`,
         `Recent requests: ${profile.recentRequests?.length ?? 0}`,
         `AI access requests: ${profile.recentAiRequests?.length ?? 0}`,
@@ -1411,6 +1416,99 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
 
   if (cmd === '/poly' || cmd === '/positions') {
     return formatPolymarketPortfolio(profile)
+  }
+
+  if (cmd === '/setemail') {
+    const email = trimmed.split(/\s+/)[1]?.toLowerCase()
+    if (!email || !isEmail(email)) {
+      return {
+        text: withFooter([
+          'Add the email address for Polymarket risk alerts.',
+          '',
+          'Example:',
+          '/setemail you@example.com',
+        ]),
+      }
+    }
+    await context.store.updateUser(context.userId, { email })
+    return {
+      text: withFooter([
+        `Email saved: ${email}`,
+        '',
+        'Turn on Polymarket downside alerts with:',
+        '/polyalerts on',
+      ]),
+    }
+  }
+
+  if (cmd === '/polyalerts') {
+    const action = trimmed.split(/\s+/)[1]?.toLowerCase()
+    if (!action || action === 'status') {
+      return { text: withFooter(formatPolymarketAlertStatus(profile, config).split('\n')) }
+    }
+    if (action === 'on') {
+      if (!profile.polymarketAddress) return promptForPolymarketAddress()
+      if (!profile.email) {
+        return {
+          text: withFooter([
+            'Save an email address first.',
+            '',
+            'Example:',
+            '/setemail you@example.com',
+          ]),
+        }
+      }
+      await context.store.updateUser(context.userId, { polymarketEmailAlertsEnabled: true })
+      return {
+        text: withFooter([
+          'Polymarket email alerts enabled.',
+          '',
+          `Email: ${profile.email}`,
+          'Trigger: any open position at or below -30% PnL.',
+          '',
+          'Run /polyalerts check to test the watcher now.',
+        ]),
+      }
+    }
+    if (action === 'off') {
+      await context.store.updateUser(context.userId, { polymarketEmailAlertsEnabled: false })
+      return { text: withFooter(['Polymarket email alerts disabled.']) }
+    }
+    if (action === 'check') {
+      const checked = await checkPolymarketRisk(profile)
+      if (!checked.ok) return { text: checked.error ?? 'Could not check Polymarket alerts right now.' }
+      if (!checked.alerts.length) {
+        await context.store.updateUser(context.userId, { polymarketAlertLastCheckedAt: Date.now() })
+        return {
+          text: withFooter([
+            'Polymarket alert check complete.',
+            '',
+            'No open positions are currently at or below -30% PnL.',
+          ]),
+        }
+      }
+      const delivery = await sendDuePolymarketAlerts(context.userId, profile, context.store, config)
+        .catch(err => ({ sent: 0, checked: true, error: err instanceof Error ? err.message : String(err) }))
+      return {
+        text: withFooter([
+          'Polymarket alert check complete.',
+          '',
+          `Risk positions: ${checked.alerts.length}`,
+          ...checked.alerts.slice(0, 5).flatMap((alert, index) => [
+            `${index + 1}. ${alert.title.slice(0, 80)}`,
+            `${alert.outcome} - PnL ${alert.percentPnl.toFixed(2)}%`,
+          ]),
+          '',
+          'Email result:',
+          'error' in delivery
+            ? delivery.error
+            : delivery.sent > 0
+              ? `Sent ${delivery.sent} email alert${delivery.sent === 1 ? '' : 's'}.`
+              : 'No email sent. Alerts may be disabled, email may be missing, or the 24h alert cooldown is active.',
+        ]),
+      }
+    }
+    return { text: 'Use /polyalerts on, /polyalerts off, /polyalerts status, or /polyalerts check.' }
   }
 
   if (cmd === '/lp') {

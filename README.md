@@ -19,6 +19,9 @@ Bot replies include the footer `Built for Photon - Powered by Hash PayLink` to k
 /request 25 USDC for invoice on arbitrum
 /setpoly 0xYourPolymarketWallet
 /poly
+/setemail you@example.com
+/polyalerts on
+/polyalerts check
 /lp best
 /answer your-payer-name
 /askpaid What should I build for the 0G hackathon?
@@ -74,6 +77,17 @@ Polymarket LP Scout is paid access:
 ```
 
 `/setpoly` saves the user's public Polymarket wallet for portfolio lookup. `/poly` reads public Polymarket positions/value for the saved wallet. The bot does not create Polymarket funding links, bridge deposits, or deposit instructions.
+
+Users can also opt into email risk alerts for public Polymarket positions:
+
+```text
+/setemail you@example.com
+/polyalerts on
+/polyalerts check
+/polyalerts off
+```
+
+When enabled, the bot scans the saved public Polymarket wallet and sends an email if any open position is at or below `-30%` PnL. Alerts are rate-limited per position to once every 24 hours. The email tells the user to review the position directly on Polymarket; it is a monitoring notice, not trading or financial advice.
 
 `/lp best` creates a Hash PayLink paid access request. After payment, `/answer <payer-name>` unlocks the scan: active Polymarket reward markets, live order books where token IDs are available, longer-duration scoring, daily rewards, max spread, min size, live spread, suggested YES/NO quote levels, LP execution risk, and outcome risk. `/lp crypto` filters by topic. `/lpmarket` inspects one market URL or slug. These commands are educational product signals only; they do not guarantee fills, rewards, badges, profit, or market outcomes.
 
@@ -138,6 +152,14 @@ WHATSAPP_APP_SECRET=
 WHATSAPP_VERIFY_TOKEN=
 WHATSAPP_GRAPH_VERSION=v20.0
 PORT=3000
+
+# Optional Polymarket risk alert emails via SendGrid.
+EMAIL_ENABLED=false
+SENDGRID_API_KEY=
+ALERT_FROM_EMAIL=alerts@yourdomain.com
+ALERT_FROM_NAME=Hash PayLink Alerts
+ALERT_REPLY_TO_EMAIL=
+POLYMARKET_ALERT_INTERVAL_MINUTES=60
 ```
 
 `ADMIN_USER_IDS` is a comma-separated list of Telegram user IDs allowed to run `/setpaid` and `/paidsettings`. Send `/me` to the bot to see your Telegram user ID.

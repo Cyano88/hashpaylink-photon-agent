@@ -21,6 +21,12 @@ export type AppConfig = {
   storePath: string
   telegramReturnUrl: string
   adminUserIds: string[]
+  emailEnabled: boolean
+  sendgridApiKey: string
+  alertFromEmail: string
+  alertFromName: string
+  alertReplyToEmail: string
+  polymarketAlertIntervalMinutes: number
 }
 
 const NETWORKS = new Set<Network>(['base', 'arbitrum', 'solana'])
@@ -61,6 +67,11 @@ function port(value: string | undefined) {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : 3000
 }
 
+function positiveNumber(value: string | undefined, fallback: number) {
+  const parsed = Number(clean(value))
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
+}
+
 export function loadConfig(): AppConfig {
   return {
     hashPayLinkBaseUrl: optional('HASH_PAYLINK_BASE_URL') || 'https://hashpaylink.com',
@@ -84,5 +95,11 @@ export function loadConfig(): AppConfig {
       .split(',')
       .map(item => item.trim())
       .filter(Boolean),
+    emailEnabled: process.env.EMAIL_ENABLED === undefined ? false : enabled(process.env.EMAIL_ENABLED),
+    sendgridApiKey: optional('SENDGRID_API_KEY'),
+    alertFromEmail: optional('ALERT_FROM_EMAIL'),
+    alertFromName: optional('ALERT_FROM_NAME') || 'Hash PayLink Alerts',
+    alertReplyToEmail: optional('ALERT_REPLY_TO_EMAIL'),
+    polymarketAlertIntervalMinutes: positiveNumber(process.env.POLYMARKET_ALERT_INTERVAL_MINUTES, 60),
   }
 }

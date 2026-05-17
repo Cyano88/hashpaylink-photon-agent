@@ -6,6 +6,11 @@ export type UserProfile = {
   evmAddress?: string
   solanaAddress?: string
   polymarketAddress?: string
+  email?: string
+  polymarketEmailAlertsEnabled?: boolean
+  polymarketAlertThresholdPercent?: number
+  polymarketAlertLastSentByPosition?: Record<string, number>
+  polymarketAlertLastCheckedAt?: number
   defaultNetwork?: 'base' | 'arbitrum' | 'solana'
   latestRequest?: PaymentRequest
   recentRequests?: PaymentRequest[]
@@ -57,6 +62,10 @@ export class ProfileStore {
 
   getPlatform() {
     return this.data.platform ?? {}
+  }
+
+  listUsers() {
+    return Object.entries(this.data.users)
   }
 
   async updatePlatform(patch: StoreData['platform']) {

@@ -2,6 +2,7 @@ import { loadConfig } from './config.js'
 import { runTelegramBot } from './telegram.js'
 import { runWhatsAppPaymentBot } from './whatsapp.js'
 import { ProfileStore } from './store.js'
+import { startPolymarketAlertWorker } from './polymarketAlerts.js'
 
 const config = loadConfig()
 const store = new ProfileStore(config.storePath)
@@ -12,5 +13,6 @@ if (config.photonProjectId && config.photonSecretKey) {
 }
 
 runWhatsAppPaymentBot(config, store)
+startPolymarketAlertWorker(config, store)
 
 void runTelegramBot(config, store)
