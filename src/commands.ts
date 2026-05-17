@@ -73,6 +73,8 @@ const HELP_LINES = [
   '/verifyagent name https://agent.example/ask price=2',
   '/setagentprice name 2',
   '/askagent name your question',
+  '/setagentstream name 25 7d',
+  '/streamagent name 25 USDC for 7d',
   '/agents',
   '',
   'Arc Streaming',
@@ -111,6 +113,10 @@ type ParsedAgentRegistration =
 
 type ParsedStreamArgs =
   | { amount: string; recipient: string; recipientKind: 'address' | 'email'; duration: string; reason: string }
+  | { error: string }
+
+type ParsedAgentStreamArgs =
+  | { slug: string; amount: string; duration: string; reason: string }
   | { error: string }
 
 type ResolvedCircleRecipientWallet =
@@ -308,6 +314,40 @@ function parseStreamArgs(text: string): ParsedStreamArgs {
   const reasonMatch = text.match(/\breason=(?:"([^"]+)"|(.+))$/i)
   const reason = (reasonMatch?.[1] ?? reasonMatch?.[2] ?? 'Arc USDC stream').trim().slice(0, MAX_MEMO_LENGTH)
   return { amount, recipient: recipient.toLowerCase(), recipientKind, duration, reason }
+}
+
+function parseAgentStreamArgs(text: string, agent?: AgentRegistration): ParsedAgentStreamArgs {
+  const parts = text.trim().split(/\s+/)
+  const slug = normalizeAgentSlug(parts[1])
+  if (!slug) return { error: 'Use /streamagent agent-name 25 USDC for 7d reason="monitoring retainer".' }
+
+  const explicitAmount = parseUsdcAmount(parts[2])
+  const amount = explicitAmount ?? agent?.streamPriceUsdc
+  let duration = agent?.streamDuration
+  let reasonStart = 2
+
+  if (explicitAmount) {
+    const forIndex = parts.findIndex((part, index) => index > 2 && part.toLowerCase() === 'for')
+    const durationCandidate = forIndex >= 0 ? parts[forIndex + 1]?.toLowerCase() : undefined
+    if (!durationCandidate || !/^\d+[dhw]$/.test(durationCandidate)) {
+      return { error: 'Use /streamagent agent-name 25 USDC for 7d reason="monitoring retainer".' }
+    }
+    duration = durationCandidate
+    reasonStart = forIndex + 2
+  }
+
+  if (!amount || !duration || !/^\d+[dhw]$/.test(duration)) {
+    return { error: `No default stream retainer is set for ${slug}. Use /streamagent ${slug} 25 USDC for 7d.` }
+  }
+
+  const reasonMatch = text.match(/\breason=(?:"([^"]+)"|(.+))$/i)
+  const reason = (reasonMatch?.[1] ?? reasonMatch?.[2] ?? parts.slice(reasonStart).join(' ').replace(/^reason=/i, '') ?? '').trim()
+  return {
+    slug,
+    amount,
+    duration,
+    reason: (reason || `Agent retainer: ${slug}`).slice(0, MAX_MEMO_LENGTH),
+  }
 }
 
 function formatRequest(request: PaymentRequest) {
@@ -1595,11 +1635,14 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
         'Agent verified on Hash PayLink.',
         '',
         `Name: ${verified.slug}`,
-        `Price: ${verified.priceUsdc} USDC`,
+        `One-time price: ${verified.priceUsdc} USDC`,
         `Endpoint: ${verified.endpointUrl}`,
         '',
-        `Users can now call:`,
+        'Users can now call:',
         `/askagent ${verified.slug} your question`,
+        '',
+        'Optional streaming retainer:',
+        `/setagentstream ${verified.slug} 25 7d`,
       ]),
     }
   }
@@ -1624,6 +1667,32 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     }
   }
 
+  if (cmd === '/setagentstream') {
+    const parts = trimmed.split(/\s+/)
+    const slug = normalizeAgentSlug(parts[1])
+    const amount = parseUsdcAmount(parts[2])
+    const duration = parts[3]?.toLowerCase()
+    if (!slug || !amount || !duration || !/^\d+[dhw]$/.test(duration)) {
+      return { text: 'Use /setagentstream agent-name 25 7d.' }
+    }
+    const agent = context.store.getAgent(slug)
+    if (!agent) return { text: `Agent "${slug}" is not registered on Hash PayLink.` }
+    if (agent.ownerUserId !== context.userId) return { text: `Only the owner of "${slug}" can update its streaming retainer.` }
+    const updated = { ...agent, streamPriceUsdc: amount, streamDuration: duration }
+    await context.store.upsertAgent(updated)
+    return {
+      text: withFooter([
+        'Agent streaming retainer updated.',
+        '',
+        `Name: ${updated.slug}`,
+        `One-time access: ${updated.priceUsdc} USDC`,
+        `Streaming retainer: ${updated.streamPriceUsdc} USDC for ${updated.streamDuration}`,
+        '',
+        `Users can now call: /streamagent ${updated.slug}`,
+      ]),
+    }
+  }
+
   if (cmd === '/agents') {
     const agents = context.store.listAgents().filter(agent => agent.status === 'active').slice(0, 10)
     if (!agents.length) return { text: 'No verified Hash PayLink agents yet.' }
@@ -1632,10 +1701,17 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
         'Verified Hash PayLink agents',
         '',
         ...agents.flatMap(agent => [
-          `${agent.slug} - ${agent.priceUsdc} USDC`,
+          `${agent.slug}`,
+          `One-time: ${agent.priceUsdc} USDC`,
           `/askagent ${agent.slug} your question`,
+          agent.streamPriceUsdc && agent.streamDuration
+            ? `Stream: ${agent.streamPriceUsdc} USDC for ${agent.streamDuration}`
+            : 'Stream: not set',
+          agent.streamPriceUsdc && agent.streamDuration
+            ? `/streamagent ${agent.slug}`
+            : '',
           '',
-        ]).slice(0, -1),
+        ]).filter(Boolean).slice(0, -1),
       ]),
     }
   }
@@ -1687,6 +1763,46 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
         ...paidAccessPayerHint(request),
       ]),
       buttons: answerButtons(request),
+    }
+  }
+
+  if (cmd === '/streamagent') {
+    const slug = normalizeAgentSlug(trimmed.split(/\s+/)[1])
+    if (!slug) return { text: 'Use /streamagent agent-name 25 USDC for 7d reason="monitoring retainer".' }
+    const agent = context.store.getAgent(slug)
+    if (!agent) return { text: `Agent "${slug}" is not registered on Hash PayLink.` }
+    if (agent.status !== 'active') return { text: `Agent "${slug}" is not active.` }
+
+    const parsed = parseAgentStreamArgs(trimmed, agent)
+    if ('error' in parsed) return { text: parsed.error }
+    const ownerProfile = context.store.getUser(agent.ownerUserId)
+    const recipient = ownerProfile.evmAddress
+    if (!recipient) {
+      return { text: `Agent "${agent.slug}" has no Arc/Circle recipient wallet configured. Ask the agent owner to run /setevm 0xAgentCircleWallet.` }
+    }
+
+    const stream = buildStreamRequest({
+      baseUrl: config.hashPayLinkBaseUrl,
+      amount: parsed.amount,
+      recipient,
+      duration: parsed.duration,
+      reason: parsed.reason,
+    })
+    await context.store.updateUser(context.userId, {
+      recentStreams: [stream, ...(profile.recentStreams ?? [])].slice(0, 5),
+    })
+    return {
+      text: withFooter([
+        'Agent StreamPay retainer created',
+        '',
+        `Agent: ${agent.slug}`,
+        `${stream.amount} USDC for ${stream.duration}`,
+        `Recipient: ${shortAddress(stream.recipient)}`,
+        `Reason: ${stream.reason}`,
+        '',
+        'This is an Arc testnet StreamPay retainer. Open StreamPay to fund and deploy the USDC stream.',
+      ]),
+      buttons: [{ text: 'Open StreamPay', url: stream.streamUrl }],
     }
   }
 

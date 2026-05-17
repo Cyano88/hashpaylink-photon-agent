@@ -29,6 +29,8 @@ export type AgentRegistration = {
   slug: string
   endpointUrl: string
   priceUsdc: string
+  streamPriceUsdc?: string
+  streamDuration?: string
   ownerUserId: string
   status: 'active' | 'disabled'
   createdAt: number

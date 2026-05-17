@@ -29,6 +29,9 @@ Bot replies include the footer `Built for Photon - Powered by Hash PayLink` to k
 /verifyagent marketbot https://api.marketbot.xyz/ask price=2
 /setagentprice marketbot 5
 /askagent marketbot Analyze BTC risk this week
+/setagentstream marketbot 25 7d
+/streamagent marketbot
+/streamagent marketbot 50 USDC for 14d reason="Polymarket monitoring retainer"
 /agents
 /stream 100 USDC to 0xRecipient for 7d reason="research retainer"
 /streams
@@ -123,6 +126,22 @@ Agent owners can update their default price without re-registering:
 ```text
 /setagentprice marketbot 5
 ```
+
+Registered agents support two payment modes:
+
+```text
+/askagent marketbot Analyze BTC risk this week
+/streamagent marketbot 25 USDC for 7d reason="Polymarket monitoring retainer"
+```
+
+`/askagent` is one-time paid access: pay once and receive one answer or report. `/streamagent` is an Arc StreamPay retainer: the user funds a time-based USDC stream to the agent owner's saved EVM/Circle wallet while the agent performs ongoing work. Agent owners can set a default retainer:
+
+```text
+/setevm 0xAgentCircleWallet
+/setagentstream marketbot 25 7d
+```
+
+StreamPay retainers currently use Arc testnet. They are intended as a Circle/Arc agent-commerce demo until StreamPay is moved to mainnet.
 
 **Arc Streaming**
 
