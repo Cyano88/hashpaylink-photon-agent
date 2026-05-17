@@ -29,6 +29,8 @@ export type AgentRegistration = {
   slug: string
   endpointUrl: string
   priceUsdc: string
+  agentWalletAddress?: string
+  agentWalletChain?: 'arc-testnet'
   streamPriceUsdc?: string
   streamDuration?: string
   ownerUserId: string

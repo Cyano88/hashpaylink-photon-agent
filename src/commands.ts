@@ -71,6 +71,8 @@ const HELP_LINES = [
   'AI Paid Access',
   '/askpaid your question',
   '/verifyagent name https://agent.example/ask price=2',
+  '/agentwalletsetup name',
+  '/setagentwallet name 0xCircleAgentWallet',
   '/setagentprice name 2',
   '/askagent name your question',
   '/setagentstream name 25 7d',
@@ -556,7 +558,29 @@ function getPlatformRecipientForNetwork(store: ProfileStore, config: AppConfig, 
 
 function getAgentOwnerRecipientForNetwork(agent: AgentRegistration, store: ProfileStore, config: AppConfig, network: Network) {
   const ownerProfile = store.getUser(agent.ownerUserId)
+  if (network !== 'solana' && agent.agentWalletAddress) return agent.agentWalletAddress
   return network === 'solana' ? ownerProfile.solanaAddress : ownerProfile.evmAddress
+}
+
+function agentWalletSetupText(agent: AgentRegistration) {
+  return withFooter([
+    'Circle Agent Wallet setup',
+    '',
+    `Agent: ${agent.slug}`,
+    '',
+    'Minimal Agent Stack path:',
+    '1. Install/login with Circle CLI.',
+    '2. Create an Arc testnet Agent Wallet.',
+    '3. Copy the 0x wallet address.',
+    '4. Register it here:',
+    `/setagentwallet ${agent.slug} 0xAgentWallet`,
+    '',
+    'Circle CLI docs:',
+    'https://developers.circle.com/agent-stack/circle-cli',
+    '',
+    'Agent Wallet quickstart:',
+    'https://developers.circle.com/agent-stack/agent-wallets/quickstart',
+  ])
 }
 
 function paidAccessPayerHint(request: PaymentRequest) {
@@ -1641,8 +1665,44 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
         'Users can now call:',
         `/askagent ${verified.slug} your question`,
         '',
+        'Circle Agent Stack wallet:',
+        `/agentwalletsetup ${verified.slug}`,
+        '',
         'Optional streaming retainer:',
         `/setagentstream ${verified.slug} 25 7d`,
+      ]),
+    }
+  }
+
+  if (cmd === '/agentwalletsetup') {
+    const slug = normalizeAgentSlug(trimmed.split(/\s+/)[1])
+    if (!slug) return { text: 'Use /agentwalletsetup agent-name.' }
+    const agent = context.store.getAgent(slug)
+    if (!agent) return { text: `Agent "${slug}" is not registered on Hash PayLink.` }
+    if (agent.ownerUserId !== context.userId) return { text: `Only the owner of "${slug}" can provision its Agent Wallet.` }
+    return { text: agentWalletSetupText(agent) }
+  }
+
+  if (cmd === '/setagentwallet') {
+    const [, slugRaw, address] = trimmed.split(/\s+/, 3)
+    const slug = normalizeAgentSlug(slugRaw)
+    if (!slug || !address || !isEvmAddress(address)) {
+      return { text: 'Use /setagentwallet agent-name 0xCircleAgentWallet.' }
+    }
+    const agent = context.store.getAgent(slug)
+    if (!agent) return { text: `Agent "${slug}" is not registered on Hash PayLink.` }
+    if (agent.ownerUserId !== context.userId) return { text: `Only the owner of "${slug}" can update its Agent Wallet.` }
+    const updated = { ...agent, agentWalletAddress: address, agentWalletChain: 'arc-testnet' as const }
+    await context.store.upsertAgent(updated)
+    return {
+      text: withFooter([
+        'Circle Agent Wallet saved.',
+        '',
+        `Agent: ${updated.slug}`,
+        `Wallet: ${shortAddress(updated.agentWalletAddress)}`,
+        'Chain: Arc testnet',
+        '',
+        'One-time /askagent and StreamPay /streamagent payments will prefer this agent wallet.',
       ]),
     }
   }
@@ -1702,6 +1762,7 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
         '',
         ...agents.flatMap(agent => [
           `${agent.slug}`,
+          `Agent Wallet: ${agent.agentWalletAddress ? shortAddress(agent.agentWalletAddress) : 'not set'}`,
           `One-time: ${agent.priceUsdc} USDC`,
           `/askagent ${agent.slug} your question`,
           agent.streamPriceUsdc && agent.streamDuration
@@ -1776,9 +1837,9 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     const parsed = parseAgentStreamArgs(trimmed, agent)
     if ('error' in parsed) return { text: parsed.error }
     const ownerProfile = context.store.getUser(agent.ownerUserId)
-    const recipient = ownerProfile.evmAddress
+    const recipient = agent.agentWalletAddress ?? ownerProfile.evmAddress
     if (!recipient) {
-      return { text: `Agent "${agent.slug}" has no Arc/Circle recipient wallet configured. Ask the agent owner to run /setevm 0xAgentCircleWallet.` }
+      return { text: `Agent "${agent.slug}" has no Circle Agent Wallet configured. Ask the owner to run /agentwalletsetup ${agent.slug}, then /setagentwallet ${agent.slug} 0xAgentWallet.` }
     }
 
     const stream = buildStreamRequest({

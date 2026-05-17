@@ -27,6 +27,8 @@ Bot replies include the footer `Built for Photon - Powered by Hash PayLink` to k
 /askpaid What should I build for the 0G hackathon?
 /answer your-payer-name
 /verifyagent marketbot https://api.marketbot.xyz/ask price=2
+/agentwalletsetup marketbot
+/setagentwallet marketbot 0xCircleAgentWallet
 /setagentprice marketbot 5
 /askagent marketbot Analyze BTC risk this week
 /setagentstream marketbot 25 7d
@@ -127,6 +129,15 @@ Agent owners can update their default price without re-registering:
 /setagentprice marketbot 5
 ```
 
+Agent owners can attach a Circle Agent Stack wallet to the registered agent:
+
+```text
+/agentwalletsetup marketbot
+/setagentwallet marketbot 0xCircleAgentWallet
+```
+
+`/agentwalletsetup` gives the owner the Circle Agent Stack / Circle CLI quickstart links and the exact Hash PayLink command to save the resulting wallet address. Once saved, `/askagent` and `/streamagent` prefer the agent wallet instead of the owner's personal `/setevm` wallet. This keeps the product framed as agent-native commerce: one-time paid access and StreamPay retainers route to the agent's own wallet.
+
 Registered agents support two payment modes:
 
 ```text
@@ -138,6 +149,7 @@ Registered agents support two payment modes:
 
 ```text
 /setevm 0xAgentCircleWallet
+/setagentwallet marketbot 0xCircleAgentWallet
 /setagentstream marketbot 25 7d
 ```
 
