@@ -72,16 +72,10 @@ const HELP_LINES = [
   'AI Paid Access',
   '/askpaid your question',
   '/verifyagent name https://agent.example/ask price=2',
-  '/agentwallet name you@example.com testnet',
-  '/agentwalletsetup name',
-  '/setagentwallet name 0xCircleAgentWallet',
-  '/setagentprice name 2',
   '/agent name',
-  '/fundagent name 10 USDC',
   '/askagent name your question',
-  '/setagentstream name 25 7d',
-  '/streamagent name 25 USDC for 7d',
-  '/circlewallet help',
+  '/fundagent name 10 USDC on base',
+  '/streamagent name',
   '/agents',
   '',
   'Arc Streaming',
@@ -587,6 +581,24 @@ function getAgent(store: ProfileStore, config: AppConfig, slug: string) {
   return store.getAgent(slug) ?? (slug === config.defaultAgentSlug ? defaultAgent(config) : undefined)
 }
 
+async function hydrateAgentWallet(agent: AgentRegistration, config: AppConfig): Promise<AgentRegistration> {
+  if (agent.agentWalletAddress || !config.agentWalletLookupEnabled) return agent
+  try {
+    const base = config.hashPayLinkBaseUrl.replace(/\/+$/, '')
+    const response = await fetch(`${base}/api/agent-wallet?agent=${encodeURIComponent(agent.slug)}`, {
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(6_000),
+    })
+    const data = await response.json().catch(() => undefined) as { ok?: boolean; found?: boolean; walletAddress?: string } | undefined
+    if (response.ok && data?.ok && data.found && data.walletAddress && isEvmAddress(data.walletAddress)) {
+      return { ...agent, agentWalletAddress: data.walletAddress, agentWalletChain: 'arc-testnet' }
+    }
+  } catch {
+    // Wallet lookup is best-effort; local registered data remains the source of truth.
+  }
+  return agent
+}
+
 function listAgents(store: ProfileStore, config: AppConfig) {
   const agents = store.listAgents()
   if (!agents.some(agent => agent.slug === config.defaultAgentSlug)) {
@@ -721,19 +733,19 @@ function agentDashboard(agent: AgentRegistration, config: AppConfig): CommandRes
       '',
       `Agent: ${agent.slug}`,
       `Agent Wallet: ${agent.agentWalletAddress ? shortAddress(agent.agentWalletAddress) : 'not set'}`,
-      `One-time access: ${agent.priceUsdc} USDC`,
+      '',
+      'Modes:',
+      `Ask once: ${agent.priceUsdc} USDC`,
       agent.streamPriceUsdc && agent.streamDuration
-        ? `Streaming retainer: ${agent.streamPriceUsdc} USDC for ${agent.streamDuration}`
-        : 'Streaming retainer: not set',
+        ? `Stream retainer: ${agent.streamPriceUsdc} USDC for ${agent.streamDuration}`
+        : 'Stream retainer: open dashboard',
+      'Fund treasury: Base or Arbitrum USDC',
       '',
-      'Payment modes:',
-      'Ask - pay once for one answer or report.',
-      'Stream - pay over time for ongoing work on Arc.',
-      'Fund - add USDC to the agent wallet treasury.',
+      'Open dashboard to create a Circle Agent Wallet, fund treasury, or start StreamPay.',
       '',
-      `Ask: /askagent ${agent.slug} your question`,
-      `Fund: /fundagent ${agent.slug} 10 USDC`,
-      agent.streamPriceUsdc && agent.streamDuration ? `Stream: /streamagent ${agent.slug}` : 'Stream: retainer not set',
+      `/askagent ${agent.slug} your question`,
+      `/fundagent ${agent.slug} 10 USDC on base`,
+      `/streamagent ${agent.slug}`,
     ]),
     buttonRows: buttonRows.length ? buttonRows : undefined,
   }
@@ -2125,11 +2137,10 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
         'Users can now call:',
         `/askagent ${verified.slug} your question`,
         '',
-        'Circle Agent Stack wallet:',
-        `/agentwalletsetup ${verified.slug}`,
+        'Agent dashboard:',
+        `/agent ${verified.slug}`,
         '',
-        'Optional streaming retainer:',
-        `/setagentstream ${verified.slug} 25 7d`,
+        'Use the dashboard to create a Circle Agent Wallet, fund treasury, or start StreamPay.',
       ]),
     }
   }
@@ -2218,12 +2229,13 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     if (!slug) return { text: `Use /agent ${config.defaultAgentSlug}.` }
     const agent = getAgent(context.store, config, slug)
     if (!agent) return { text: `Agent "${slug}" is not registered on Hash PayLink.` }
-    if (agent.status !== 'active') return { text: `Agent "${slug}" is not active.` }
-    return agentDashboard(agent, config)
+    const hydrated = await hydrateAgentWallet(agent, config)
+    if (hydrated.status !== 'active') return { text: `Agent "${slug}" is not active.` }
+    return agentDashboard(hydrated, config)
   }
 
   if (cmd === '/agents') {
-    const agents = listAgents(context.store, config).filter(agent => agent.status === 'active').slice(0, 10)
+    const agents = await Promise.all(listAgents(context.store, config).filter(agent => agent.status === 'active').slice(0, 10).map(agent => hydrateAgentWallet(agent, config)))
     if (!agents.length) return { text: 'No verified Hash PayLink agents yet.' }
     return {
       text: withFooter([
@@ -2253,8 +2265,9 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     const slug = normalizeAgentSlug(parts[1])
     const amount = parseUsdcAmount(parts[2])
     if (!slug || !amount) return { text: 'Use /fundagent agent-name 10 USDC on base.' }
-    const agent = getAgent(context.store, config, slug)
-    if (!agent) return { text: `Agent "${slug}" is not registered on Hash PayLink.` }
+    const found = getAgent(context.store, config, slug)
+    if (!found) return { text: `Agent "${slug}" is not registered on Hash PayLink.` }
+    const agent = await hydrateAgentWallet(found, config)
     if (agent.status !== 'active') return { text: `Agent "${slug}" is not active.` }
     if (!agent.agentWalletAddress) {
       return { text: `Agent "${agent.slug}" has no Circle Agent Wallet configured yet. Ask the owner to run /setagentwallet ${agent.slug} 0xAgentWallet.` }
@@ -2293,8 +2306,9 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     const parts = trimmed.split(/\s+/)
     const slug = normalizeAgentSlug(parts[1])
     if (!slug) return { text: 'Use /askagent agent-name your question.' }
-    const agent = getAgent(context.store, config, slug)
-    if (!agent) return { text: `Agent "${slug}" is not registered on Hash PayLink.` }
+    const found = getAgent(context.store, config, slug)
+    if (!found) return { text: `Agent "${slug}" is not registered on Hash PayLink.` }
+    const agent = await hydrateAgentWallet(found, config)
     if (agent.status !== 'active') return { text: `Agent "${slug}" is not active.` }
     const question = parts.slice(2).join(' ').trim()
     if (!question) return { text: `Ask a question after the agent name. Example: /askagent ${slug} Analyze BTC risk.` }
@@ -2342,8 +2356,9 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
   if (cmd === '/streamagent') {
     const slug = normalizeAgentSlug(trimmed.split(/\s+/)[1])
     if (!slug) return { text: 'Use /streamagent agent-name 25 USDC for 7d reason="monitoring retainer".' }
-    const agent = getAgent(context.store, config, slug)
-    if (!agent) return { text: `Agent "${slug}" is not registered on Hash PayLink.` }
+    const found = getAgent(context.store, config, slug)
+    if (!found) return { text: `Agent "${slug}" is not registered on Hash PayLink.` }
+    const agent = await hydrateAgentWallet(found, config)
     if (agent.status !== 'active') return { text: `Agent "${slug}" is not active.` }
 
     const parsed = parseAgentStreamArgs(trimmed, agent)

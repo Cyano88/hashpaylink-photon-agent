@@ -33,6 +33,7 @@ export type AppConfig = {
   defaultAgentStreamPriceUsdc: string
   defaultAgentStreamDuration: string
   defaultAgentWalletAddress: string
+  agentWalletLookupEnabled: boolean
   circleCliEnabled: boolean
   circleCliSpendingEnabled: boolean
 }
@@ -115,6 +116,7 @@ export function loadConfig(): AppConfig {
     defaultAgentStreamPriceUsdc: optional('DEFAULT_AGENT_STREAM_PRICE_USDC') || '25',
     defaultAgentStreamDuration: optional('DEFAULT_AGENT_STREAM_DURATION') || '7d',
     defaultAgentWalletAddress: optional('DEFAULT_AGENT_WALLET_ADDRESS'),
+    agentWalletLookupEnabled: process.env.AGENT_WALLET_LOOKUP_ENABLED === undefined ? true : enabled(process.env.AGENT_WALLET_LOOKUP_ENABLED),
     circleCliEnabled: enabled(process.env.CIRCLE_CLI_ENABLED),
     circleCliSpendingEnabled: enabled(process.env.CIRCLE_CLI_SPENDING_ENABLED),
   }
