@@ -67,6 +67,7 @@ const HELP_LINES = [
   'Paid Polymarket LP Scout',
   '/lp best',
   '/lp crypto',
+  '/lp x402',
   '/lpmarket polymarket-url-or-slug',
   '',
   'AI Paid Access',
@@ -1469,6 +1470,112 @@ async function createPaidLpRequest(rawQuery: string, profile: UserProfile, confi
   }
 }
 
+function extractJsonFromCliOutput(output: string) {
+  const start = output.indexOf('{')
+  const end = output.lastIndexOf('}')
+  if (start < 0 || end <= start) return undefined
+  try {
+    return JSON.parse(output.slice(start, end + 1)) as {
+      scout?: { summary?: string; signals?: string[]; nextAction?: string; disclaimer?: string }
+      receipt?: { provider?: string; price?: string; seller?: string }
+      payment?: { payer?: string; amount?: string; network?: string }
+    }
+  } catch {
+    return undefined
+  }
+}
+
+async function runX402LpScout(config: AppConfig, context: CommandContext): Promise<CommandResult> {
+  const found = getAgent(context.store, config, config.defaultAgentSlug)
+  if (!found) return { text: `Default agent "${config.defaultAgentSlug}" is not registered.` }
+  const agent = await hydrateAgentWallet(found, config)
+  if (!agent.agentWalletAddress) {
+    return {
+      text: withFooter([
+        'x402 LP Scout needs a Circle Agent Wallet first.',
+        '',
+        'Human pay model:',
+        'Human pays agent. Agent answers.',
+        '',
+        'x402 model:',
+        'Agent pays API. API returns data. Agent answers human.',
+        '',
+        `Open /agent ${agent.slug}, create the Circle Agent Wallet on the dashboard, then retry /lp x402.`,
+      ]),
+      buttonRows: [[{ text: 'Open Agent Dashboard', url: buildAgentProfileUrl(agent, config) }]],
+    }
+  }
+  if (!config.circleCliEnabled) {
+    return {
+      text: withFooter([
+        'x402 buyer mode is ready, but Circle CLI execution is disabled on this bot runtime.',
+        '',
+        'Enable CIRCLE_CLI_ENABLED=true on the Photon bot service.',
+        '',
+        'What this will do:',
+        `Agent wallet ${shortAddress(agent.agentWalletAddress)} pays ${config.x402PolymarketScoutMaxAmount} USDC max for:`,
+        config.x402PolymarketScoutUrl,
+      ]),
+    }
+  }
+
+  const args = [
+    'services',
+    'pay',
+    config.x402PolymarketScoutUrl,
+    '--address',
+    agent.agentWalletAddress,
+    '--chain',
+    'BASE',
+    '--max-amount',
+    config.x402PolymarketScoutMaxAmount,
+  ]
+  const result = await runCircleCli(args, { sessionKey: circleSessionKey(context.userId, agent.slug) })
+  const parsed = result.ok ? extractJsonFromCliOutput(result.output) : undefined
+  if (!result.ok) {
+    return {
+      text: withFooter([
+        'x402 agent payment did not complete.',
+        '',
+        'What should happen:',
+        'Agent pays API. API returns data. Agent answers human.',
+        '',
+        'Most likely missing setup:',
+        '1. Circle CLI session for this agent on the bot runtime.',
+        '2. Gateway nanopayments balance for the agent wallet.',
+        '',
+        'Command attempted:',
+        formatCliCommand(args),
+        '',
+        result.output.slice(0, 1800),
+      ]),
+    }
+  }
+
+  return {
+    text: withFooter([
+      'x402 LP Scout paid by agent wallet',
+      '',
+      'Human pay model:',
+      'Human pays agent. Agent answers.',
+      '',
+      'x402 model:',
+      'Agent paid Hash PayLink API. API returned scout data. Agent answers human.',
+      '',
+      `Agent: ${agent.slug}`,
+      `Wallet: ${shortAddress(agent.agentWalletAddress)}`,
+      parsed?.payment?.amount ? `Paid: ${parsed.payment.amount}` : `Max spend: ${config.x402PolymarketScoutMaxAmount} USDC`,
+      parsed?.payment?.network ? `Network: ${parsed.payment.network}` : 'Network: Circle Gateway x402',
+      '',
+      parsed?.scout?.summary ?? 'Scout response received from x402 service.',
+      '',
+      ...(parsed?.scout?.signals ?? []).slice(0, 4).map(signal => `- ${signal}`),
+      parsed?.scout?.nextAction ? `Next: ${parsed.scout.nextAction}` : '',
+      parsed?.receipt?.provider ? `Receipt: ${parsed.receipt.provider}` : 'Receipt: Circle Gateway x402',
+    ].filter(Boolean)),
+  }
+}
+
 async function formatPolymarketPortfolio(profile: UserProfile): Promise<CommandResult> {
   const address = profile.polymarketAddress
   if (!address) return promptForPolymarketAddress()
@@ -2056,6 +2163,9 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
   }
 
   if (cmd === '/lp') {
+    if (trimmed.split(/\s+/)[1]?.toLowerCase() === 'x402') {
+      return runX402LpScout(config, context)
+    }
     return createPaidLpRequest(trimmed, profile, config, context)
   }
 

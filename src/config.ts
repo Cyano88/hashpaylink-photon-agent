@@ -34,6 +34,8 @@ export type AppConfig = {
   defaultAgentStreamDuration: string
   defaultAgentWalletAddress: string
   agentWalletLookupEnabled: boolean
+  x402PolymarketScoutUrl: string
+  x402PolymarketScoutMaxAmount: string
   circleCliEnabled: boolean
   circleCliSpendingEnabled: boolean
 }
@@ -117,6 +119,8 @@ export function loadConfig(): AppConfig {
     defaultAgentStreamDuration: optional('DEFAULT_AGENT_STREAM_DURATION') || '7d',
     defaultAgentWalletAddress: optional('DEFAULT_AGENT_WALLET_ADDRESS'),
     agentWalletLookupEnabled: process.env.AGENT_WALLET_LOOKUP_ENABLED === undefined ? true : enabled(process.env.AGENT_WALLET_LOOKUP_ENABLED),
+    x402PolymarketScoutUrl: optional('X402_POLYMARKET_SCOUT_URL') || `${(optional('HASH_PAYLINK_BASE_URL') || 'https://hashpaylink.com').replace(/\/+$/, '')}/api/x402/polymarket-scout`,
+    x402PolymarketScoutMaxAmount: optional('X402_POLYMARKET_SCOUT_MAX_AMOUNT') || '0.01',
     circleCliEnabled: enabled(process.env.CIRCLE_CLI_ENABLED),
     circleCliSpendingEnabled: enabled(process.env.CIRCLE_CLI_SPENDING_ENABLED),
   }
