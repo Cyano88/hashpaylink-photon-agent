@@ -19,6 +19,13 @@ export type UserProfile = {
   recentLpRequests?: PaymentRequest[]
   recentStreams?: StreamRequest[]
   pendingStreams?: PendingStreamRequest[]
+  circleWalletProvisioning?: {
+    agentSlug: string
+    email: string
+    requestId?: string
+    testnet?: boolean
+    createdAt: number
+  }
   botMessagesByChat?: Record<string, number[]>
 }
 

@@ -4,7 +4,7 @@ export type PaymentRequest = {
   amount: string
   memo: string
   network: Network
-  kind: 'collection' | 'ai_access' | 'agent_access' | 'lp_access'
+  kind: 'collection' | 'ai_access' | 'agent_access' | 'lp_access' | 'agent_funding'
   payUrl: string
   dashboardUrl: string
   id: string

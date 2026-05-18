@@ -27,10 +27,14 @@ Bot replies include the footer `Built for Photon - Powered by Hash PayLink` to k
 /askpaid What should I build for the 0G hackathon?
 /answer your-payer-name
 /verifyagent marketbot https://api.marketbot.xyz/ask price=2
+/agentwallet marketbot you@example.com testnet
+/agentwallet code OTP-FROM-EMAIL
 /agentwalletsetup marketbot
 /setagentwallet marketbot 0xCircleAgentWallet
 /setagentprice marketbot 5
+/agent marketbot
 /askagent marketbot Analyze BTC risk this week
+/fundagent marketbot 10 USDC on base
 /setagentstream marketbot 25 7d
 /streamagent marketbot
 /streamagent marketbot 50 USDC for 14d reason="Polymarket monitoring retainer"
@@ -132,11 +136,15 @@ Agent owners can update their default price without re-registering:
 Agent owners can attach a Circle Agent Stack wallet to the registered agent:
 
 ```text
+/agentwallet marketbot you@example.com testnet
+/agentwallet code OTP-FROM-EMAIL
 /agentwalletsetup marketbot
 /setagentwallet marketbot 0xCircleAgentWallet
 ```
 
-`/agentwalletsetup` gives the owner the Circle Agent Stack / Circle CLI quickstart links and the exact Hash PayLink command to save the resulting wallet address. Once saved, `/askagent` and `/streamagent` prefer the agent wallet instead of the owner's personal `/setevm` wallet. This keeps the product framed as agent-native commerce: one-time paid access and StreamPay retainers route to the agent's own wallet.
+`/agentwallet` is the minimal in-chat provisioning flow. It starts Circle CLI's non-interactive OTP login for the agent owner, completes the OTP step, reads the resulting Circle Agent Wallet address, and saves it to the registered agent. Circle auth is isolated per Telegram user and agent under `data/circle-sessions/`. Circle's OTP still goes to the owner email; the bot never asks for a private key.
+
+`/agentwalletsetup` remains the manual fallback. It gives the owner the Circle Agent Stack / Circle CLI quickstart links and the exact Hash PayLink command to save the resulting wallet address. Once saved, `/askagent`, `/fundagent`, and `/streamagent` prefer the agent wallet instead of the owner's personal `/setevm` wallet. This keeps the product framed as agent-native commerce: one-time paid access, treasury funding, and StreamPay retainers route to the agent's own wallet.
 
 For Circle Agent Stack experiments, `/circlewallet help` shows a guarded Circle CLI bridge. By default it prints exact CLI commands for manual review. If `CIRCLE_CLI_ENABLED=true` and Circle CLI is installed on the runtime, the bot can execute read commands such as list and balance. Value-moving commands require the separate `CIRCLE_CLI_SPENDING_ENABLED=true` flag and admin access.
 
@@ -163,14 +171,18 @@ DEFAULT_AGENT_WALLET_ADDRESS=0xCircleAgentWallet
 
 If `DEFAULT_AGENT_WALLET_ADDRESS` is not set, `/agents` still shows the agent, but `/askagent` and `/streamagent` will ask for a wallet before routing payments to it.
 
-Registered agents support two payment modes:
+Registered agents support three clean payment modes:
 
 ```text
+/agent marketbot
 /askagent marketbot Analyze BTC risk this week
+/fundagent marketbot 10 USDC on base
 /streamagent marketbot 25 USDC for 7d reason="Polymarket monitoring retainer"
 ```
 
-`/askagent` is one-time paid access: pay once and receive one answer or report. `/streamagent` is an Arc StreamPay retainer: the user funds a time-based USDC stream to the agent owner's saved EVM/Circle wallet while the agent performs ongoing work. Agent owners can set a default retainer:
+`/agent` is the compact agent profile and dashboard. It shows the agent wallet, one-time price, stream retainer, and buttons for the most important money flows when the wallet is configured.
+
+`/askagent` is one-time paid access: pay once and receive one answer or report. `/fundagent` creates a Hash PayLink payment link that funds the agent's Circle Agent Wallet treasury directly on an EVM network such as Base or Arbitrum. `/streamagent` is an Arc StreamPay retainer: the user funds a time-based USDC stream to the agent owner's saved EVM/Circle wallet while the agent performs ongoing work. Agent owners can set a default retainer:
 
 ```text
 /setevm 0xAgentCircleWallet
