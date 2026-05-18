@@ -36,6 +36,7 @@ export type AppConfig = {
   agentWalletLookupEnabled: boolean
   x402PolymarketScoutUrl: string
   x402PolymarketScoutMaxAmount: string
+  agentWalletServiceSecret: string
   circleCliEnabled: boolean
   circleCliSpendingEnabled: boolean
 }
@@ -121,6 +122,7 @@ export function loadConfig(): AppConfig {
     agentWalletLookupEnabled: process.env.AGENT_WALLET_LOOKUP_ENABLED === undefined ? true : enabled(process.env.AGENT_WALLET_LOOKUP_ENABLED),
     x402PolymarketScoutUrl: optional('X402_POLYMARKET_SCOUT_URL') || `${(optional('HASH_PAYLINK_BASE_URL') || 'https://hashpaylink.com').replace(/\/+$/, '')}/api/x402/polymarket-scout`,
     x402PolymarketScoutMaxAmount: optional('X402_POLYMARKET_SCOUT_MAX_AMOUNT') || '0.01',
+    agentWalletServiceSecret: optional('AGENT_WALLET_SERVICE_SECRET'),
     circleCliEnabled: enabled(process.env.CIRCLE_CLI_ENABLED),
     circleCliSpendingEnabled: enabled(process.env.CIRCLE_CLI_SPENDING_ENABLED),
   }

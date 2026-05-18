@@ -1470,24 +1470,10 @@ async function createPaidLpRequest(rawQuery: string, profile: UserProfile, confi
   }
 }
 
-function extractJsonFromCliOutput(output: string) {
-  const start = output.indexOf('{')
-  const end = output.lastIndexOf('}')
-  if (start < 0 || end <= start) return undefined
-  try {
-    return JSON.parse(output.slice(start, end + 1)) as {
-      scout?: { summary?: string; signals?: string[]; nextAction?: string; disclaimer?: string }
-      receipt?: { provider?: string; price?: string; seller?: string }
-      payment?: { payer?: string; amount?: string; network?: string }
-    }
-  } catch {
-    return undefined
-  }
-}
-
-async function runX402LpScout(config: AppConfig, context: CommandContext): Promise<CommandResult> {
-  const found = getAgent(context.store, config, config.defaultAgentSlug)
-  if (!found) return { text: `Default agent "${config.defaultAgentSlug}" is not registered.` }
+async function runX402LpScout(config: AppConfig, context: CommandContext, rawAgentSlug?: string): Promise<CommandResult> {
+  const slug = normalizeAgentSlug(rawAgentSlug) || config.defaultAgentSlug
+  const found = getAgent(context.store, config, slug)
+  if (!found) return { text: `Agent "${slug}" is not registered.` }
   const agent = await hydrateAgentWallet(found, config)
   if (!agent.agentWalletAddress) {
     return {
@@ -1505,12 +1491,12 @@ async function runX402LpScout(config: AppConfig, context: CommandContext): Promi
       buttonRows: [[{ text: 'Open Agent Dashboard', url: buildAgentProfileUrl(agent, config) }]],
     }
   }
-  if (!config.circleCliEnabled) {
+  if (!config.agentWalletServiceSecret) {
     return {
       text: withFooter([
-        'x402 buyer mode is ready, but Circle CLI execution is disabled on this bot runtime.',
+        'x402 buyer mode needs the secure Agent Wallet executor secret.',
         '',
-        'Enable CIRCLE_CLI_ENABLED=true on the Photon bot service.',
+        'Set AGENT_WALLET_SERVICE_SECRET on both the web service and Photon bot.',
         '',
         'What this will do:',
         `Agent wallet ${shortAddress(agent.agentWalletAddress)} pays ${config.x402PolymarketScoutMaxAmount} USDC max for:`,
@@ -1519,20 +1505,32 @@ async function runX402LpScout(config: AppConfig, context: CommandContext): Promi
     }
   }
 
-  const args = [
-    'services',
-    'pay',
-    config.x402PolymarketScoutUrl,
-    '--address',
-    agent.agentWalletAddress,
-    '--chain',
-    'BASE',
-    '--max-amount',
-    config.x402PolymarketScoutMaxAmount,
-  ]
-  const result = await runCircleCli(args, { sessionKey: circleSessionKey(context.userId, agent.slug) })
-  const parsed = result.ok ? extractJsonFromCliOutput(result.output) : undefined
-  if (!result.ok) {
+  const executorUrl = `${config.hashPayLinkBaseUrl.replace(/\/+$/, '')}/api/agent-wallet`
+  const response = await fetch(executorUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-agent-wallet-secret': config.agentWalletServiceSecret,
+    },
+    body: JSON.stringify({
+      action: 'pay-service',
+      agentSlug: agent.slug,
+      serviceUrl: config.x402PolymarketScoutUrl,
+      maxAmount: config.x402PolymarketScoutMaxAmount,
+    }),
+    signal: AbortSignal.timeout(75_000),
+  })
+  const data = await response.json().catch(() => undefined) as {
+    ok?: boolean
+    error?: string
+    response?: {
+      scout?: { summary?: string; signals?: string[]; nextAction?: string; disclaimer?: string }
+      receipt?: { provider?: string; price?: string; seller?: string }
+      payment?: { payer?: string; amount?: string; network?: string }
+    }
+    raw?: string
+  } | undefined
+  if (!response.ok || !data?.ok) {
     return {
       text: withFooter([
         'x402 agent payment did not complete.',
@@ -1540,17 +1538,12 @@ async function runX402LpScout(config: AppConfig, context: CommandContext): Promi
         'What should happen:',
         'Agent pays API. API returns data. Agent answers human.',
         '',
-        'Most likely missing setup:',
-        '1. Circle CLI session for this agent on the bot runtime.',
-        '2. Gateway nanopayments balance for the agent wallet.',
-        '',
-        'Command attempted:',
-        formatCliCommand(args),
-        '',
-        result.output.slice(0, 1800),
+        data?.error ?? 'Agent Wallet executor did not return a successful payment.',
+        data?.raw ? data.raw.slice(0, 1200) : '',
       ]),
     }
   }
+  const parsed = data.response
 
   return {
     text: withFooter([
@@ -2164,7 +2157,7 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
 
   if (cmd === '/lp') {
     if (trimmed.split(/\s+/)[1]?.toLowerCase() === 'x402') {
-      return runX402LpScout(config, context)
+      return runX402LpScout(config, context, trimmed.split(/\s+/)[2])
     }
     return createPaidLpRequest(trimmed, profile, config, context)
   }
