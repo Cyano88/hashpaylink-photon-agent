@@ -27,6 +27,12 @@ export type AppConfig = {
   alertFromName: string
   alertReplyToEmail: string
   polymarketAlertIntervalMinutes: number
+  defaultAgentSlug: string
+  defaultAgentEndpointUrl: string
+  defaultAgentPriceUsdc: string
+  defaultAgentStreamPriceUsdc: string
+  defaultAgentStreamDuration: string
+  defaultAgentWalletAddress: string
 }
 
 const NETWORKS = new Set<Network>(['base', 'arbitrum', 'solana'])
@@ -101,5 +107,11 @@ export function loadConfig(): AppConfig {
     alertFromName: optional('ALERT_FROM_NAME') || 'Hash PayLink Alerts',
     alertReplyToEmail: optional('ALERT_REPLY_TO_EMAIL'),
     polymarketAlertIntervalMinutes: positiveNumber(process.env.POLYMARKET_ALERT_INTERVAL_MINUTES, 60),
+    defaultAgentSlug: optional('DEFAULT_AGENT_SLUG') || 'hashpaylink-agent',
+    defaultAgentEndpointUrl: optional('DEFAULT_AGENT_ENDPOINT_URL') || 'https://hashpaylink.com/api/agent-ask',
+    defaultAgentPriceUsdc: optional('DEFAULT_AGENT_PRICE_USDC') || '1',
+    defaultAgentStreamPriceUsdc: optional('DEFAULT_AGENT_STREAM_PRICE_USDC') || '25',
+    defaultAgentStreamDuration: optional('DEFAULT_AGENT_STREAM_DURATION') || '7d',
+    defaultAgentWalletAddress: optional('DEFAULT_AGENT_WALLET_ADDRESS'),
   }
 }

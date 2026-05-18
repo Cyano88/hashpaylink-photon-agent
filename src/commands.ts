@@ -562,6 +562,38 @@ function getAgentOwnerRecipientForNetwork(agent: AgentRegistration, store: Profi
   return network === 'solana' ? ownerProfile.solanaAddress : ownerProfile.evmAddress
 }
 
+function defaultAgent(config: AppConfig): AgentRegistration {
+  return {
+    slug: config.defaultAgentSlug,
+    endpointUrl: config.defaultAgentEndpointUrl,
+    priceUsdc: config.defaultAgentPriceUsdc,
+    streamPriceUsdc: config.defaultAgentStreamPriceUsdc,
+    streamDuration: config.defaultAgentStreamDuration,
+    agentWalletAddress: config.defaultAgentWalletAddress || undefined,
+    agentWalletChain: config.defaultAgentWalletAddress ? 'arc-testnet' : undefined,
+    ownerUserId: 'platform',
+    status: 'active',
+    createdAt: 0,
+    verifiedAt: 0,
+  }
+}
+
+function getAgent(store: ProfileStore, config: AppConfig, slug: string) {
+  return store.getAgent(slug) ?? (slug === config.defaultAgentSlug ? defaultAgent(config) : undefined)
+}
+
+function listAgents(store: ProfileStore, config: AppConfig) {
+  const agents = store.listAgents()
+  if (!agents.some(agent => agent.slug === config.defaultAgentSlug)) {
+    agents.unshift(defaultAgent(config))
+  }
+  return agents
+}
+
+function canManageAgent(agent: AgentRegistration, config: AppConfig, userId: string) {
+  return agent.ownerUserId === userId || (agent.ownerUserId === 'platform' && isAdmin(config, userId))
+}
+
 function agentWalletSetupText(agent: AgentRegistration) {
   return withFooter([
     'Circle Agent Wallet setup',
@@ -1247,7 +1279,7 @@ async function answerPaidAccessRequest(
   }
 
   if (request.kind === 'agent_access') {
-    const agent = request.agentSlug ? context.store.getAgent(request.agentSlug) : undefined
+    const agent = request.agentSlug ? getAgent(context.store, config, request.agentSlug) : undefined
     if (!agent || agent.status !== 'active') return { text: 'Agent is no longer active on Hash PayLink.' }
     const result = await callExternalAgent(agent, request, payer, config)
     if ('error' in result) return { text: result.error ?? 'Agent access failed.' }
@@ -1646,8 +1678,8 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
   if (cmd === '/verifyagent') {
     const parsed = parseAgentRegistrationArgs(trimmed)
     if ('error' in parsed) return { text: parsed.error }
-    const existing = context.store.getAgent(parsed.slug)
-    if (existing && existing.ownerUserId !== context.userId) {
+    const existing = getAgent(context.store, config, parsed.slug)
+    if (existing && !canManageAgent(existing, config, context.userId)) {
       return { text: `Agent name "${parsed.slug}" is already registered.` }
     }
 
@@ -1677,9 +1709,9 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
   if (cmd === '/agentwalletsetup') {
     const slug = normalizeAgentSlug(trimmed.split(/\s+/)[1])
     if (!slug) return { text: 'Use /agentwalletsetup agent-name.' }
-    const agent = context.store.getAgent(slug)
+    const agent = getAgent(context.store, config, slug)
     if (!agent) return { text: `Agent "${slug}" is not registered on Hash PayLink.` }
-    if (agent.ownerUserId !== context.userId) return { text: `Only the owner of "${slug}" can provision its Agent Wallet.` }
+    if (!canManageAgent(agent, config, context.userId)) return { text: `Only the owner of "${slug}" can provision its Agent Wallet.` }
     return { text: agentWalletSetupText(agent) }
   }
 
@@ -1689,9 +1721,9 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     if (!slug || !address || !isEvmAddress(address)) {
       return { text: 'Use /setagentwallet agent-name 0xCircleAgentWallet.' }
     }
-    const agent = context.store.getAgent(slug)
+    const agent = getAgent(context.store, config, slug)
     if (!agent) return { text: `Agent "${slug}" is not registered on Hash PayLink.` }
-    if (agent.ownerUserId !== context.userId) return { text: `Only the owner of "${slug}" can update its Agent Wallet.` }
+    if (!canManageAgent(agent, config, context.userId)) return { text: `Only the owner of "${slug}" can update its Agent Wallet.` }
     const updated = { ...agent, agentWalletAddress: address, agentWalletChain: 'arc-testnet' as const }
     await context.store.upsertAgent(updated)
     return {
@@ -1712,9 +1744,9 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     const slug = normalizeAgentSlug(parts[1])
     const priceUsdc = parseUsdcAmount(parts[2])
     if (!slug || !priceUsdc) return { text: 'Use /setagentprice agent-name 2.' }
-    const agent = context.store.getAgent(slug)
+    const agent = getAgent(context.store, config, slug)
     if (!agent) return { text: `Agent "${slug}" is not registered on Hash PayLink.` }
-    if (agent.ownerUserId !== context.userId) return { text: `Only the owner of "${slug}" can update its default price.` }
+    if (!canManageAgent(agent, config, context.userId)) return { text: `Only the owner of "${slug}" can update its default price.` }
     const updated = { ...agent, priceUsdc }
     await context.store.upsertAgent(updated)
     return {
@@ -1735,9 +1767,9 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     if (!slug || !amount || !duration || !/^\d+[dhw]$/.test(duration)) {
       return { text: 'Use /setagentstream agent-name 25 7d.' }
     }
-    const agent = context.store.getAgent(slug)
+    const agent = getAgent(context.store, config, slug)
     if (!agent) return { text: `Agent "${slug}" is not registered on Hash PayLink.` }
-    if (agent.ownerUserId !== context.userId) return { text: `Only the owner of "${slug}" can update its streaming retainer.` }
+    if (!canManageAgent(agent, config, context.userId)) return { text: `Only the owner of "${slug}" can update its streaming retainer.` }
     const updated = { ...agent, streamPriceUsdc: amount, streamDuration: duration }
     await context.store.upsertAgent(updated)
     return {
@@ -1754,7 +1786,7 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
   }
 
   if (cmd === '/agents') {
-    const agents = context.store.listAgents().filter(agent => agent.status === 'active').slice(0, 10)
+    const agents = listAgents(context.store, config).filter(agent => agent.status === 'active').slice(0, 10)
     if (!agents.length) return { text: 'No verified Hash PayLink agents yet.' }
     return {
       text: withFooter([
@@ -1781,7 +1813,7 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     const parts = trimmed.split(/\s+/)
     const slug = normalizeAgentSlug(parts[1])
     if (!slug) return { text: 'Use /askagent agent-name your question.' }
-    const agent = context.store.getAgent(slug)
+    const agent = getAgent(context.store, config, slug)
     if (!agent) return { text: `Agent "${slug}" is not registered on Hash PayLink.` }
     if (agent.status !== 'active') return { text: `Agent "${slug}" is not active.` }
     const question = parts.slice(2).join(' ').trim()
@@ -1830,7 +1862,7 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
   if (cmd === '/streamagent') {
     const slug = normalizeAgentSlug(trimmed.split(/\s+/)[1])
     if (!slug) return { text: 'Use /streamagent agent-name 25 USDC for 7d reason="monitoring retainer".' }
-    const agent = context.store.getAgent(slug)
+    const agent = getAgent(context.store, config, slug)
     if (!agent) return { text: `Agent "${slug}" is not registered on Hash PayLink.` }
     if (agent.status !== 'active') return { text: `Agent "${slug}" is not active.` }
 
