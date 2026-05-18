@@ -33,6 +33,8 @@ export type AppConfig = {
   defaultAgentStreamPriceUsdc: string
   defaultAgentStreamDuration: string
   defaultAgentWalletAddress: string
+  circleCliEnabled: boolean
+  circleCliSpendingEnabled: boolean
 }
 
 const NETWORKS = new Set<Network>(['base', 'arbitrum', 'solana'])
@@ -113,5 +115,7 @@ export function loadConfig(): AppConfig {
     defaultAgentStreamPriceUsdc: optional('DEFAULT_AGENT_STREAM_PRICE_USDC') || '25',
     defaultAgentStreamDuration: optional('DEFAULT_AGENT_STREAM_DURATION') || '7d',
     defaultAgentWalletAddress: optional('DEFAULT_AGENT_WALLET_ADDRESS'),
+    circleCliEnabled: enabled(process.env.CIRCLE_CLI_ENABLED),
+    circleCliSpendingEnabled: enabled(process.env.CIRCLE_CLI_SPENDING_ENABLED),
   }
 }

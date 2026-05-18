@@ -138,6 +138,18 @@ Agent owners can attach a Circle Agent Stack wallet to the registered agent:
 
 `/agentwalletsetup` gives the owner the Circle Agent Stack / Circle CLI quickstart links and the exact Hash PayLink command to save the resulting wallet address. Once saved, `/askagent` and `/streamagent` prefer the agent wallet instead of the owner's personal `/setevm` wallet. This keeps the product framed as agent-native commerce: one-time paid access and StreamPay retainers route to the agent's own wallet.
 
+For Circle Agent Stack experiments, `/circlewallet help` shows a guarded Circle CLI bridge. By default it prints exact CLI commands for manual review. If `CIRCLE_CLI_ENABLED=true` and Circle CLI is installed on the runtime, the bot can execute read commands such as list and balance. Value-moving commands require the separate `CIRCLE_CLI_SPENDING_ENABLED=true` flag and admin access.
+
+```text
+/circlewallet login you@example.com testnet
+/circlewallet list ARC-TESTNET
+/circlewallet balance hashpaylink-agent ARC-TESTNET
+/circlewallet fund hashpaylink-agent ARC-TESTNET
+/circlewallet transfer hashpaylink-agent 1 0xRecipient ARC-TESTNET
+/circlewallet bridge hashpaylink-agent 1 ARC-TESTNET BASE-SEPOLIA
+/circlewallet swap hashpaylink-agent EURC 10 USDC 9.9 BASE
+```
+
 The bot also ships with a built-in platform agent so `/agents` is never empty for new users. Configure it in Render with:
 
 ```env

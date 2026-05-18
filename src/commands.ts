@@ -1,4 +1,5 @@
 import type { AppConfig, Network } from './config.js'
+import { formatCliCommand, runCircleCli } from './circleCli.js'
 import { checkPolymarketRisk, formatPolymarketAlertStatus, sendDuePolymarketAlerts } from './polymarketAlerts.js'
 import {
   buildPaymentRequest,
@@ -77,6 +78,7 @@ const HELP_LINES = [
   '/askagent name your question',
   '/setagentstream name 25 7d',
   '/streamagent name 25 USDC for 7d',
+  '/circlewallet help',
   '/agents',
   '',
   'Arc Streaming',
@@ -592,6 +594,158 @@ function listAgents(store: ProfileStore, config: AppConfig) {
 
 function canManageAgent(agent: AgentRegistration, config: AppConfig, userId: string) {
   return agent.ownerUserId === userId || (agent.ownerUserId === 'platform' && isAdmin(config, userId))
+}
+
+function isSafeChain(value: string | undefined) {
+  return !!value && /^[A-Z0-9-]{2,32}$/.test(value)
+}
+
+function isSafeToken(value: string | undefined) {
+  return !!value && /^[A-Z0-9-]{2,16}$/.test(value)
+}
+
+function resolveAgentWalletTarget(raw: string | undefined, store: ProfileStore, config: AppConfig) {
+  if (!raw) return undefined
+  if (isEvmAddress(raw)) return raw
+  const slug = normalizeAgentSlug(raw)
+  if (!slug) return undefined
+  return getAgent(store, config, slug)?.agentWalletAddress
+}
+
+function circleWalletHelp(config: AppConfig) {
+  return withFooter([
+    'Circle Agent Wallet CLI',
+    '',
+    `Execution: ${config.circleCliEnabled ? 'enabled' : 'disabled'}`,
+    `Spending commands: ${config.circleCliSpendingEnabled ? 'enabled' : 'disabled'}`,
+    '',
+    'Setup:',
+    '/circlewallet login you@example.com testnet',
+    '/circlewallet list ARC-TESTNET',
+    '',
+    'Read:',
+    '/circlewallet balance hashpaylink-agent ARC-TESTNET',
+    '',
+    'Fund:',
+    '/circlewallet fund hashpaylink-agent ARC-TESTNET',
+    '',
+    'Spending command previews:',
+    '/circlewallet transfer hashpaylink-agent 1 0xRecipient ARC-TESTNET',
+    '/circlewallet bridge hashpaylink-agent 1 ARC-TESTNET BASE-SEPOLIA',
+    '/circlewallet swap hashpaylink-agent EURC 10 USDC 9.9 BASE',
+  ])
+}
+
+async function formatCircleCliResponse(config: AppConfig, args: string[], execute: boolean, spending: boolean) {
+  const command = formatCliCommand(args)
+  if (!execute || !config.circleCliEnabled || (spending && !config.circleCliSpendingEnabled)) {
+    return withFooter([
+      spending && !config.circleCliSpendingEnabled
+        ? 'Circle CLI spending execution is disabled. Review and run manually:'
+        : config.circleCliEnabled
+          ? 'Circle CLI command preview:'
+          : 'Circle CLI execution is disabled. Run manually:',
+      '',
+      command,
+    ])
+  }
+
+  const result = await runCircleCli(args)
+  return withFooter([
+    result.ok ? 'Circle CLI result' : 'Circle CLI error',
+    '',
+    command,
+    '',
+    result.output.slice(0, 3000),
+  ])
+}
+
+async function handleCircleWalletCommand(trimmed: string, config: AppConfig, context: CommandContext): Promise<CommandResult> {
+  const parts = trimmed.split(/\s+/)
+  const action = parts[1]?.toLowerCase()
+  if (!action || action === 'help') return { text: circleWalletHelp(config) }
+
+  if (action === 'login') {
+    const email = parts[2]?.toLowerCase()
+    if (!email || !isEmail(email)) return { text: 'Use /circlewallet login you@example.com testnet.' }
+    const testnet = parts.includes('testnet') || parts.includes('--testnet')
+    return {
+      text: await formatCircleCliResponse(config, ['wallet', 'login', email, ...(testnet ? ['--testnet'] : [])], false, false),
+    }
+  }
+
+  if (action === 'list') {
+    const chain = (parts[2] ?? 'ARC-TESTNET').toUpperCase()
+    if (!isSafeChain(chain)) return { text: 'Use /circlewallet list ARC-TESTNET.' }
+    return {
+      text: await formatCircleCliResponse(config, ['wallet', 'list', '--type', 'agent', '--chain', chain], true, false),
+    }
+  }
+
+  if (action === 'balance') {
+    const address = resolveAgentWalletTarget(parts[2] ?? config.defaultAgentSlug, context.store, config)
+    const chain = (parts[3] ?? 'ARC-TESTNET').toUpperCase()
+    if (!address || !isSafeChain(chain)) return { text: 'Use /circlewallet balance hashpaylink-agent ARC-TESTNET.' }
+    return {
+      text: await formatCircleCliResponse(config, ['wallet', 'balance', '--address', address, '--chain', chain], true, false),
+    }
+  }
+
+  if (action === 'fund') {
+    const address = resolveAgentWalletTarget(parts[2] ?? config.defaultAgentSlug, context.store, config)
+    const chain = (parts[3] ?? 'ARC-TESTNET').toUpperCase()
+    if (!address || !isSafeChain(chain)) return { text: 'Use /circlewallet fund hashpaylink-agent ARC-TESTNET.' }
+    const args = chain.includes('TESTNET')
+      ? ['wallet', 'fund', '--address', address, '--chain', chain]
+      : ['wallet', 'fund', '--address', address, '--chain', chain, '--amount', parts[4] ?? '10', '--method', 'crypto']
+    return { text: await formatCircleCliResponse(config, args, chain.includes('TESTNET'), true) }
+  }
+
+  if (action === 'transfer') {
+    if (!isAdmin(config, context.userId)) return { text: adminRequiredText() }
+    const address = resolveAgentWalletTarget(parts[2], context.store, config)
+    const amount = parseUsdcAmount(parts[3])
+    const recipient = parts[4]
+    const chain = (parts[5] ?? 'ARC-TESTNET').toUpperCase()
+    if (!address || !amount || !recipient || !isEvmAddress(recipient) || !isSafeChain(chain)) {
+      return { text: 'Use /circlewallet transfer hashpaylink-agent 1 0xRecipient ARC-TESTNET.' }
+    }
+    return {
+      text: await formatCircleCliResponse(config, ['wallet', 'transfer', '--address', address, '--chain', chain, '--amount', amount, '--to', recipient], true, true),
+    }
+  }
+
+  if (action === 'bridge') {
+    if (!isAdmin(config, context.userId)) return { text: adminRequiredText() }
+    const address = resolveAgentWalletTarget(parts[2], context.store, config)
+    const amount = parseUsdcAmount(parts[3])
+    const fromChain = (parts[4] ?? '').toUpperCase()
+    const toChain = (parts[5] ?? '').toUpperCase()
+    if (!address || !amount || !isSafeChain(fromChain) || !isSafeChain(toChain)) {
+      return { text: 'Use /circlewallet bridge hashpaylink-agent 1 ARC-TESTNET BASE-SEPOLIA.' }
+    }
+    return {
+      text: await formatCircleCliResponse(config, ['bridge', 'transfer', toChain, '--amount', amount, '--address', address, '--chain', fromChain], true, true),
+    }
+  }
+
+  if (action === 'swap') {
+    if (!isAdmin(config, context.userId)) return { text: adminRequiredText() }
+    const address = resolveAgentWalletTarget(parts[2], context.store, config)
+    const sellToken = parts[3]?.toUpperCase()
+    const sellAmount = parseUsdcAmount(parts[4])
+    const buyToken = parts[5]?.toUpperCase()
+    const buyMin = parseUsdcAmount(parts[6])
+    const chain = (parts[7] ?? 'BASE').toUpperCase()
+    if (!address || !isSafeToken(sellToken) || !sellAmount || !isSafeToken(buyToken) || !buyMin || !isSafeChain(chain)) {
+      return { text: 'Use /circlewallet swap hashpaylink-agent EURC 10 USDC 9.9 BASE.' }
+    }
+    return {
+      text: await formatCircleCliResponse(config, ['wallet', 'swap', sellToken, sellAmount, buyToken, buyMin, '--address', address, '--chain', chain], true, true),
+    }
+  }
+
+  return { text: circleWalletHelp(config) }
 }
 
 function agentWalletSetupText(agent: AgentRegistration) {
@@ -1437,6 +1591,10 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
   if (cmd === '/paidsettings') {
     if (!isAdmin(config, context.userId)) return { text: adminRequiredText() }
     return { text: paidSettingsText(context.store, config) }
+  }
+
+  if (cmd === '/circlewallet') {
+    return handleCircleWalletCommand(trimmed, config, context)
   }
 
   if (cmd === '/network') {
