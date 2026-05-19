@@ -1586,9 +1586,9 @@ async function runX402LpScout(config: AppConfig, context: CommandContext, rawAge
         text: withFooter([
           'x402 agent payment needs wallet reconnect.',
           '',
-          'Your agent wallet address is saved, but Circle requires a fresh secure spending session before it can pay an x402 API.',
+          'Your agent wallet address is saved, but Circle requires a fresh Base spending session before it can pay an x402 API.',
           '',
-          'Open the agent dashboard, login with the same Circle email, then retry /lp x402.',
+          'Open the agent dashboard, keep the network on Base, login with the same Circle email, then retry /lp x402.',
         ]),
         buttonRows: [[{ text: 'Reconnect Agent Wallet', url: buildAgentProfileUrl(agent, config) }]],
       }
