@@ -1571,6 +1571,7 @@ async function runX402LpScout(config: AppConfig, context: CommandContext, rawAge
   })
   const data = await response.json().catch(() => undefined) as {
     ok?: boolean
+    code?: string
     error?: string
     response?: {
       scout?: { summary?: string; signals?: string[]; nextAction?: string; disclaimer?: string }
@@ -1580,6 +1581,18 @@ async function runX402LpScout(config: AppConfig, context: CommandContext, rawAge
     raw?: string
   } | undefined
   if (!response.ok || !data?.ok) {
+    if (data?.code === 'circle_session_expired') {
+      return {
+        text: withFooter([
+          'x402 agent payment needs wallet reconnect.',
+          '',
+          'Your agent wallet address is saved, but Circle requires a fresh secure spending session before it can pay an x402 API.',
+          '',
+          'Open the agent dashboard, login with the same Circle email, then retry /lp x402.',
+        ]),
+        buttonRows: [[{ text: 'Reconnect Agent Wallet', url: buildAgentProfileUrl(agent, config) }]],
+      }
+    }
     return {
       text: withFooter([
         'x402 agent payment did not complete.',
