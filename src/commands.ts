@@ -5,6 +5,7 @@ import {
   buildPaymentRequest,
   buildPendingStreamRequest,
   buildStreamRequest,
+  createRequestId,
   type AgentRegistration,
   type PendingStreamRequest,
   type PaymentRequest,
@@ -60,6 +61,7 @@ const HELP_LINES = [
   'Polymarket Watchlist',
   '/setpoly 0xYourPolymarketWallet',
   '/poly',
+  '/fund polymarket on base',
   '/setemail you@example.com',
   '/polyalerts on',
   '/polyalerts check',
@@ -693,6 +695,36 @@ function buildAgentFundingRequest(agent: AgentRegistration, amount: string, netw
     kind: 'agent_funding',
     agentSlug: agent.slug,
   })
+}
+
+function buildPolymarketFundingRequest(profile: UserProfile, amount: string | undefined, network: Network, config: AppConfig): PaymentRequest | undefined {
+  if (!profile.polymarketAddress) return undefined
+  if (network === 'solana') return undefined
+
+  const id = createRequestId()
+  const base = config.hashPayLinkBaseUrl.replace(/\/+$/, '')
+  const params = new URLSearchParams()
+  params.set('id', id)
+  params.set('m', 'Polymarket')
+  params.set('n', network)
+  params.set('src', 't')
+  params.set('brand', 'polymarket')
+  params.set('pm', '1')
+  if (amount) params.set('a', amount)
+  else params.set('f', '1')
+  if (config.telegramReturnUrl) params.set('r', config.telegramReturnUrl)
+  params.set('e', profile.polymarketAddress)
+  if (config.defaultSolanaAddress) params.set('s', config.defaultSolanaAddress)
+
+  return {
+    amount: amount ?? 'open',
+    memo: 'Polymarket',
+    network,
+    kind: 'collection',
+    id,
+    payUrl: `${base}/pay?${params.toString()}`,
+    dashboardUrl: `${base}/dashboard?${params.toString()}`,
+  }
 }
 
 function buildAgentStreamRequest(agent: AgentRegistration, config: AppConfig) {
@@ -2402,6 +2434,45 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
         'This funds the agent treasury wallet directly through Hash PayLink.',
       ]),
       buttons: [{ text: 'Fund Agent Wallet', url: request.payUrl }],
+    }
+  }
+
+  if (cmd === '/fund') {
+    const parts = trimmed.split(/\s+/)
+    if ((parts[1] ?? '').toLowerCase() !== 'polymarket') {
+      return { text: 'Use /fund polymarket on base or /fund polymarket 2 on base.' }
+    }
+
+    const partsForNetwork = [...parts]
+    const network = extractNetworkOverride(partsForNetwork, userNetwork(profile, config))
+    if (network === 'solana') {
+      return { text: 'Polymarket funding currently supports saved EVM Polymarket wallets on Base or Arbitrum. Use /fund polymarket on base.' }
+    }
+
+    const amount = parseUsdcAmount(partsForNetwork[2])
+    if (partsForNetwork[2] && !amount) return { text: 'Use /fund polymarket on base or /fund polymarket 2 on base.' }
+    if (!profile.polymarketAddress) return { text: 'No Polymarket wallet is saved yet. Use /setpoly 0xYourPolymarketWallet first.' }
+
+    const request = buildPolymarketFundingRequest(profile, amount, network, config)
+    if (!request) return { text: 'Could not create the Polymarket funding link. Check your saved Polymarket wallet.' }
+    requests.set(request.id, request)
+    latestRequestByUser.set(context.userId, request.id)
+    await context.store.updateUser(context.userId, {
+      latestRequest: request,
+      recentRequests: [request, ...(profile.recentRequests ?? [])].slice(0, 5),
+    })
+
+    return {
+      text: withFooter([
+        'Polymarket funding link created',
+        '',
+        `Amount: ${amount ? `${amount} USDC` : 'payer enters amount'}`,
+        `Network: ${request.network}`,
+        `Polymarket wallet: ${shortAddress(profile.polymarketAddress)}`,
+        '',
+        'Memo: Polymarket',
+      ]),
+      buttons: [{ text: 'Fund Polymarket', url: request.payUrl }],
     }
   }
 
