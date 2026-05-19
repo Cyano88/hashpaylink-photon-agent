@@ -30,6 +30,7 @@ const requests = new Map<string, PaymentRequest>()
 const latestRequestByUser = new Map<string, string>()
 const FOOTER = 'Built for Photon - Powered by Hash PayLink'
 const MAX_USDC_WHOLE_DIGITS = 12
+const POLYMARKET_MIN_FUNDING_USDC = 4
 const MAX_MEMO_LENGTH = 180
 const MAX_QUESTION_LENGTH = 1_000
 const MAX_AGENT_SLUG_LENGTH = 32
@@ -240,6 +241,10 @@ function parseUsdcAmount(rawAmount: string | undefined): string | undefined {
   const rawUnits = BigInt(whole || '0') * 1_000_000n + BigInt((match[2] ?? '').padEnd(6, '0'))
   if (rawUnits <= 0n) return undefined
   return fraction ? `${whole}.${fraction}` : whole
+}
+
+function isBelowPolymarketFundingMinimum(amount: string | undefined) {
+  return !!amount && Number(amount) < POLYMARKET_MIN_FUNDING_USDC
 }
 
 function parseRequestArgs(text: string, fallbackNetwork: Network): ParsedRequestArgs {
@@ -2504,6 +2509,9 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
 
     const amount = parseUsdcAmount(partsForNetwork[2])
     if (partsForNetwork[2] && !amount) return { text: 'Use /fund polymarket on base or /fund polymarket 2 on base.' }
+    if (isBelowPolymarketFundingMinimum(amount)) {
+      return { text: `Polymarket funding minimum is ${POLYMARKET_MIN_FUNDING_USDC} USDC. Use /fund polymarket ${POLYMARKET_MIN_FUNDING_USDC} on base or /fund polymarket on base.` }
+    }
     if (!profile.polymarketFundingAddress) return { text: 'No Polymarket funding wallet is saved yet. Use /setpolyfund 0xFundingWallet first.' }
 
     const request = buildPolymarketFundingRequest(profile, amount, network, config)
@@ -2519,7 +2527,7 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
       text: withFooter([
         'Polymarket funding link created',
         '',
-        `Amount: ${amount ? `${amount} USDC` : 'payer enters amount'}`,
+        `Amount: ${amount ? `${amount} USDC` : `payer enters amount, minimum ${POLYMARKET_MIN_FUNDING_USDC} USDC`}`,
         `Network: ${request.network}`,
         `Funding wallet: ${shortAddress(profile.polymarketFundingAddress)}`,
         profile.polymarketAddress ? `Watch wallet: ${shortAddress(profile.polymarketAddress)}` : '',
