@@ -6,6 +6,7 @@ export type UserProfile = {
   evmAddress?: string
   solanaAddress?: string
   polymarketAddress?: string
+  polymarketFundingAddress?: string
   email?: string
   polymarketEmailAlertsEnabled?: boolean
   polymarketAlertThresholdPercent?: number

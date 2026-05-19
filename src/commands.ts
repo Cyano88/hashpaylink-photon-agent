@@ -59,8 +59,9 @@ const HELP_LINES = [
   '/requests',
   '',
   'Polymarket Watchlist',
-  '/setpoly 0xYourPolymarketWallet',
+  '/setpoly 0xPublicPolymarketWallet',
   '/poly',
+  '/setpolyfund 0xFundingWallet',
   '/fund polymarket on base',
   '/setemail you@example.com',
   '/polyalerts on',
@@ -539,9 +540,20 @@ function promptForPolymarketAddress(): CommandResult {
     text: withFooter([
       'Paste your Polymarket public wallet address.',
       '',
-      'This is the 0x address from your Polymarket profile. It is used only for public portfolio lookup.',
+      'This is the 0x address from your Polymarket profile. It is used only for public portfolio lookup, watchlist, and alerts.',
     ]),
-    forceReplyPlaceholder: '0xYourPolymarketWallet',
+    forceReplyPlaceholder: '0xPublicPolymarketWallet',
+  }
+}
+
+function promptForPolymarketFundingAddress(): CommandResult {
+  return {
+    text: withFooter([
+      'Paste the wallet that should receive Polymarket funding.',
+      '',
+      'This can be your Polymarket deposit wallet or another EVM wallet you want funded through Hash PayLink.',
+    ]),
+    forceReplyPlaceholder: '0xFundingWallet',
   }
 }
 
@@ -698,7 +710,7 @@ function buildAgentFundingRequest(agent: AgentRegistration, amount: string, netw
 }
 
 function buildPolymarketFundingRequest(profile: UserProfile, amount: string | undefined, network: Network, config: AppConfig): PaymentRequest | undefined {
-  if (!profile.polymarketAddress) return undefined
+  if (!profile.polymarketFundingAddress) return undefined
   if (network === 'solana') return undefined
 
   const id = createRequestId()
@@ -713,7 +725,7 @@ function buildPolymarketFundingRequest(profile: UserProfile, amount: string | un
   if (amount) params.set('a', amount)
   else params.set('f', '1')
   if (config.telegramReturnUrl) params.set('r', config.telegramReturnUrl)
-  params.set('e', profile.polymarketAddress)
+  params.set('e', profile.polymarketFundingAddress)
   if (config.defaultSolanaAddress) params.set('s', config.defaultSolanaAddress)
 
   return {
@@ -1427,7 +1439,7 @@ async function formatPolymarketLpScoutResult(rawQuery: string): Promise<CommandR
       ]).slice(0, -1),
       '',
       'To watch your public positions:',
-      '/setpoly 0xYourPolymarketWallet',
+      '/setpoly 0xPublicPolymarketWallet',
       '/poly',
     ]),
   }
@@ -1627,9 +1639,9 @@ async function formatPolymarketPortfolio(profile: UserProfile): Promise<CommandR
           ]).slice(0, -1)
           : ['No open positions found from the public Data API.']),
         '',
-        'To fund:',
-        '/setpoly 0xYourPolymarketWallet',
-        '/poly',
+        'Funding wallet is separate:',
+        '/setpolyfund 0xFundingWallet',
+        '/fund polymarket on base',
       ]),
     }
   } catch {
@@ -1920,8 +1932,27 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     })
     return {
       text: withFooter([
-        `Polymarket wallet saved: ${shortAddress(trimmed)}`,
-        'This is used only for public position/value lookup.',
+        `Polymarket public wallet saved: ${shortAddress(trimmed)}`,
+        'Use: public watchlist, position lookup, and email alerts.',
+        '',
+        'For funding links, set a funding wallet separately:',
+        '/setpolyfund 0xFundingWallet',
+      ]),
+    }
+  }
+
+  if (/Paste the wallet that should receive Polymarket funding/i.test(replyToText)) {
+    if (!isEvmAddress(trimmed)) return promptForPolymarketFundingAddress()
+    await context.store.updateUser(context.userId, {
+      polymarketFundingAddress: trimmed,
+    })
+    return {
+      text: withFooter([
+        `Polymarket funding wallet saved: ${shortAddress(trimmed)}`,
+        'Use: Hash PayLink funding checkout recipient.',
+        '',
+        'To create a funding link:',
+        '/fund polymarket on base',
       ]),
     }
   }
@@ -1961,8 +1992,29 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     })
     return {
       text: withFooter([
-        `Polymarket wallet saved: ${shortAddress(address)}`,
-        'This is used only for public position/value lookup.',
+        `Polymarket public wallet saved: ${shortAddress(address)}`,
+        'Use: public watchlist, position lookup, and email alerts.',
+        '',
+        'Funding is separate:',
+        '/setpolyfund 0xFundingWallet',
+      ]),
+    }
+  }
+
+  if (cmd === '/setpolyfund') {
+    const address = trimmed.split(/\s+/)[1]
+    if (!address) return promptForPolymarketFundingAddress()
+    if (!isEvmAddress(address)) return promptForPolymarketFundingAddress()
+    await context.store.updateUser(context.userId, {
+      polymarketFundingAddress: address,
+    })
+    return {
+      text: withFooter([
+        `Polymarket funding wallet saved: ${shortAddress(address)}`,
+        'Use: Hash PayLink funding checkout recipient.',
+        '',
+        'To create a funding link:',
+        '/fund polymarket on base',
       ]),
     }
   }
@@ -2041,7 +2093,8 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
         `Telegram user ID: ${context.userId}`,
         `EVM: ${shortAddress(profile.evmAddress)}`,
         `Solana: ${shortAddress(profile.solanaAddress)}`,
-        `Polymarket: ${shortAddress(profile.polymarketAddress)}`,
+        `Polymarket watch: ${shortAddress(profile.polymarketAddress)}`,
+        `Polymarket fund: ${shortAddress(profile.polymarketFundingAddress)}`,
         `Email alerts: ${profile.polymarketEmailAlertsEnabled ? profile.email ?? 'on, email missing' : 'off'}`,
         `Default network: ${userNetwork(profile, config)}`,
         `Recent requests: ${profile.recentRequests?.length ?? 0}`,
@@ -2451,10 +2504,10 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
 
     const amount = parseUsdcAmount(partsForNetwork[2])
     if (partsForNetwork[2] && !amount) return { text: 'Use /fund polymarket on base or /fund polymarket 2 on base.' }
-    if (!profile.polymarketAddress) return { text: 'No Polymarket wallet is saved yet. Use /setpoly 0xYourPolymarketWallet first.' }
+    if (!profile.polymarketFundingAddress) return { text: 'No Polymarket funding wallet is saved yet. Use /setpolyfund 0xFundingWallet first.' }
 
     const request = buildPolymarketFundingRequest(profile, amount, network, config)
-    if (!request) return { text: 'Could not create the Polymarket funding link. Check your saved Polymarket wallet.' }
+    if (!request) return { text: 'Could not create the Polymarket funding link. Check your saved Polymarket funding wallet.' }
     requests.set(request.id, request)
     latestRequestByUser.set(context.userId, request.id)
     await context.store.updateUser(context.userId, {
@@ -2468,10 +2521,11 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
         '',
         `Amount: ${amount ? `${amount} USDC` : 'payer enters amount'}`,
         `Network: ${request.network}`,
-        `Polymarket wallet: ${shortAddress(profile.polymarketAddress)}`,
+        `Funding wallet: ${shortAddress(profile.polymarketFundingAddress)}`,
+        profile.polymarketAddress ? `Watch wallet: ${shortAddress(profile.polymarketAddress)}` : '',
         '',
         'Memo: Polymarket',
-      ]),
+      ].filter(Boolean)),
       buttons: [{ text: 'Fund Polymarket', url: request.payUrl }],
     }
   }

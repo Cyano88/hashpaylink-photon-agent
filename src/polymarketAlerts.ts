@@ -158,7 +158,7 @@ function threshold(profile: UserProfile) {
 }
 
 export async function checkPolymarketRisk(profile: UserProfile): Promise<PolymarketAlertCheck> {
-  if (!profile.polymarketAddress) return { ok: false, alerts: [], settlements: [], error: 'No Polymarket wallet is saved. Use /setpoly 0xYourPolymarketWallet.' }
+  if (!profile.polymarketAddress) return { ok: false, alerts: [], settlements: [], error: 'No Polymarket watch wallet is saved. Use /setpoly 0xPublicPolymarketWallet.' }
   try {
     const cutoff = -Math.abs(threshold(profile))
     const positions = await fetchPositions(profile.polymarketAddress)
