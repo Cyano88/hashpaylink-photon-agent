@@ -1574,7 +1574,7 @@ async function runX402LpScout(config: AppConfig, context: CommandContext, rawAge
     code?: string
     error?: string
     response?: {
-      scout?: { summary?: string; signals?: string[]; nextAction?: string; disclaimer?: string }
+      scout?: { summary?: string; signals?: string[]; opportunities?: Array<Record<string, unknown>>; nextAction?: string; disclaimer?: string }
       receipt?: { provider?: string; price?: string; seller?: string }
       payment?: { payer?: string; amount?: string; network?: string }
     }
@@ -1606,6 +1606,25 @@ async function runX402LpScout(config: AppConfig, context: CommandContext, rawAge
     }
   }
   const parsed = data.response
+  const opportunities = Array.isArray(parsed?.scout?.opportunities) ? parsed.scout.opportunities.slice(0, 3) : []
+  const opportunityLines = opportunities.flatMap((opportunity: Record<string, unknown>, index: number) => {
+    const title = typeof opportunity.title === 'string' ? opportunity.title : 'Polymarket reward market'
+    const dailyReward = typeof opportunity.dailyReward === 'number' ? `${formatUsdc(opportunity.dailyReward)} USDC/day` : 'reward n/a'
+    const liveSpread = typeof opportunity.liveSpread === 'number' ? formatCents(opportunity.liveSpread) : 'n/a'
+    const maxSpread = typeof opportunity.maxSpread === 'number' ? formatCents(opportunity.maxSpread) : 'n/a'
+    const yesBid = typeof opportunity.suggestedYesBid === 'number' ? formatCents(opportunity.suggestedYesBid) : 'n/a'
+    const noBid = typeof opportunity.suggestedNoBid === 'number' ? formatCents(opportunity.suggestedNoBid) : 'n/a'
+    const days = typeof opportunity.daysToResolve === 'number' ? formatDays(opportunity.daysToResolve) : 'unknown'
+    const risk = typeof opportunity.lpExecutionRisk === 'string' ? opportunity.lpExecutionRisk : 'unknown'
+    const url = typeof opportunity.marketUrl === 'string' ? opportunity.marketUrl : ''
+    return [
+      `${index + 1}. ${title.slice(0, 90)}`,
+      `Reward: ${dailyReward} | Spread: ${liveSpread} / max ${maxSpread}`,
+      `Time: ${days} | Quote idea: YES ${yesBid} / NO ${noBid}`,
+      `Risk: ${risk}${url ? ` | ${url}` : ''}`,
+      '',
+    ]
+  }).slice(0, -1)
 
   return {
     text: withFooter([
@@ -1624,7 +1643,8 @@ async function runX402LpScout(config: AppConfig, context: CommandContext, rawAge
       '',
       parsed?.scout?.summary ?? 'Scout response received from x402 service.',
       '',
-      ...(parsed?.scout?.signals ?? []).slice(0, 4).map(signal => `- ${signal}`),
+      ...(opportunityLines.length ? opportunityLines : (parsed?.scout?.signals ?? []).slice(0, 4).map(signal => `- ${signal}`)),
+      opportunityLines.length ? '' : '',
       parsed?.scout?.nextAction ? `Next: ${parsed.scout.nextAction}` : '',
       parsed?.receipt?.provider ? `Receipt: ${parsed.receipt.provider}` : 'Receipt: Circle Gateway x402',
     ].filter(Boolean)),
