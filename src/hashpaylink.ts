@@ -76,6 +76,11 @@ export function buildPaymentRequest(input: BuildInput): PaymentRequest {
   params.set('v', '1')
   params.set('src', 't')
   if (input.returnUrl) params.set('r', input.returnUrl)
+  if (input.kind) params.set('kind', input.kind)
+  if (input.agentSlug) {
+    params.set('agent', input.agentSlug)
+    params.set('agentSlug', input.agentSlug)
+  }
 
   if (input.evmAddress) params.set('e', input.evmAddress)
   if (input.solanaAddress) params.set('s', input.solanaAddress)
