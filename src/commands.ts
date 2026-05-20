@@ -49,6 +49,8 @@ const NETWORK_HELP = [
   '/request 10 USDC for design on solana',
   '/request 10 USDC for design on arbitrum',
 ]
+const POLYMARKET_AUTOPILOT_TEST_CAP_USDC = 5
+const POLYMARKET_AUTOPILOT_STOP_LOSS_PERCENT = 30
 
 const HELP_LINES = [
   'Hash PayLink Agent',
@@ -1630,6 +1632,23 @@ async function runX402LpScout(config: AppConfig, context: CommandContext, rawAge
       '',
     ]
   }).slice(0, -1)
+  const topOpportunity = opportunities[0] as Record<string, unknown> | undefined
+  const topTitle = typeof topOpportunity?.title === 'string' ? topOpportunity.title.slice(0, 82) : 'top ranked market'
+  const topMinSize = typeof topOpportunity?.minSize === 'number' ? topOpportunity.minSize : undefined
+  const topYesBid = typeof topOpportunity?.suggestedYesBid === 'number' ? formatCents(topOpportunity.suggestedYesBid) : 'n/a'
+  const topNoBid = typeof topOpportunity?.suggestedNoBid === 'number' ? formatCents(topOpportunity.suggestedNoBid) : 'n/a'
+  const autopilotLines = topOpportunity
+    ? [
+        'Autopilot preview (dry-run)',
+        topTitle,
+        typeof topMinSize === 'number' && topMinSize > POLYMARKET_AUTOPILOT_TEST_CAP_USDC
+          ? `Action: skip - min quote ${formatUsdc(topMinSize)} USDC exceeds ${POLYMARKET_AUTOPILOT_TEST_CAP_USDC} USDC test cap.`
+          : `Action: would place maker quote up to ${typeof topMinSize === 'number' ? formatUsdc(topMinSize) : POLYMARKET_AUTOPILOT_TEST_CAP_USDC} USDC.`,
+        `Entry: YES ${topYesBid} / NO ${topNoBid}`,
+        `Risk rule: alert/close review at -${POLYMARKET_AUTOPILOT_STOP_LOSS_PERCENT}% PnL.`,
+        'Mode: execution locked until Polymarket trading credentials are added.',
+      ]
+    : []
 
   return {
     text: withFooter([
@@ -1644,9 +1663,11 @@ async function runX402LpScout(config: AppConfig, context: CommandContext, rawAge
       '',
       ...(opportunityLines.length ? opportunityLines : (parsed?.scout?.signals ?? []).slice(0, 4).map(signal => `- ${signal}`)),
       opportunityLines.length ? '' : '',
+      ...autopilotLines,
+      autopilotLines.length ? '' : '',
       'Next: re-check depth, then quote only inside reward spread.',
       parsed?.receipt?.provider ? `Receipt: ${parsed.receipt.provider}` : 'Receipt: Circle Gateway x402',
-    ].filter(Boolean)),
+    ].filter((line): line is string => typeof line === 'string')),
     buttonRows: marketButtons.length ? [marketButtons] : undefined,
   }
 }
