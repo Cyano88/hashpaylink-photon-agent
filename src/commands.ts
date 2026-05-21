@@ -122,18 +122,25 @@ const LP_HELP_LINES = [
 const AGENT_HELP_LINES = [
   'Agents',
   '',
-  '/agents',
-  '/agent hashpaylink-agent',
-  '/askagent hashpaylink-agent your question',
-  '/fundagent hashpaylink-agent 10 USDC on base',
-  '/streamagent hashpaylink-agent',
+  '1. Create wallet',
+  '/createagentwallet name',
+  '/agentwalletsetup name',
   '',
-  'Agent owners:',
+  '2. Register agent',
   '/verifyagent name https://agent.example/ask price=2',
-  '/agentwallet name you@example.com testnet',
-  '/agentwallet code OTP',
   '/setagentwallet name 0xWallet',
   '/setagentstream name 25 7d',
+  '',
+  '3. Launch and use',
+  '/agents',
+  '/agent name',
+  '/askagent name your question',
+  '/fundagent name 10 USDC on base',
+  '/streamagent name',
+  '',
+  'Advanced OTP fallback',
+  '/agentwallet name you@example.com testnet',
+  '/agentwallet code OTP',
 ]
 
 const SETTINGS_HELP_LINES = [
@@ -863,6 +870,17 @@ function buildAgentProfileUrl(agent: AgentRegistration, config: AppConfig) {
   return `${base}/agent?${params.toString()}`
 }
 
+function buildAgentWalletSetupUrl(slug: string, config: AppConfig) {
+  const base = config.hashPayLinkBaseUrl.replace(/\/+$/, '')
+  const params = new URLSearchParams()
+  params.set('profile', 'agent')
+  params.set('agent', slug)
+  params.set('price', config.defaultAgentPriceUsdc)
+  params.set('fund', '10')
+  params.set('n', 'arc')
+  return `${base}/agent?${params.toString()}`
+}
+
 function agentDashboard(agent: AgentRegistration, config: AppConfig): CommandResult {
   const funding = buildAgentFundingRequest(agent, '10', 'base', config)
   const stream = buildAgentStreamRequest(agent, config)
@@ -1011,13 +1029,14 @@ async function handleAgentWalletCommand(trimmed: string, config: AppConfig, cont
   if (!actionOrSlug || actionOrSlug === 'help') {
     return {
       text: withFooter([
-        'Agent Wallet setup',
+        'Agent Wallet',
         '',
-        'One clean flow:',
+        'Recommended:',
+        '/createagentwallet agent-name',
+        '',
+        'OTP fallback:',
         '/agentwallet agent-name you@example.com testnet',
         '/agentwallet code OTP-FROM-EMAIL',
-        '',
-        'This provisions a Circle Agent Wallet session for your registered agent, saves the wallet address, and then /agent shows Fund Agent Wallet.',
       ]),
     }
   }
@@ -1095,7 +1114,7 @@ async function handleAgentWalletCommand(trimmed: string, config: AppConfig, cont
   const testnet = parts.includes('testnet') || parts.includes('--testnet')
   if (!slug || !email || !isEmail(email)) return { text: 'Use /agentwallet agent-name you@example.com testnet.' }
   const agent = getAgent(context.store, config, slug)
-  if (!agent) return { text: `Agent "${slug}" is not registered on Hash PayLink.` }
+  if (!agent) return createAgentWalletResult(slug, config)
   if (!canManageAgent(agent, config, context.userId)) return { text: 'Only the agent owner can provision this wallet.' }
   if (!config.circleCliEnabled) {
     return agentWalletSetupResult(agent, config)
@@ -1156,6 +1175,23 @@ function agentWalletSetupResult(agent: AgentRegistration, config: AppConfig): Co
       `/setagentwallet ${agent.slug} 0xWallet`,
     ]),
     buttons: [{ text: 'Open Agent Dashboard', url: buildAgentProfileUrl(agent, config) }],
+  }
+}
+
+function createAgentWalletResult(slug: string, config: AppConfig): CommandResult {
+  return {
+    text: withFooter([
+      'Create Agent Wallet',
+      '',
+      `Agent: ${slug}`,
+      '',
+      'Open the dashboard and connect the Circle Agent Wallet.',
+      '',
+      'Then register or launch the agent:',
+      `/verifyagent ${slug} https://agent.example/ask price=2`,
+      `/agent ${slug}`,
+    ]),
+    buttons: [{ text: 'Open Agent Dashboard', url: buildAgentWalletSetupUrl(slug, config) }],
   }
 }
 
@@ -2215,6 +2251,12 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     return handleAgentWalletCommand(trimmed, config, context)
   }
 
+  if (cmd === '/createagentwallet') {
+    const slug = normalizeAgentSlug(trimmed.split(/\s+/)[1] ?? config.defaultAgentSlug)
+    if (!slug) return { text: `Use /createagentwallet ${config.defaultAgentSlug}.` }
+    return createAgentWalletResult(slug, config)
+  }
+
   if (cmd === '/circlewallet') {
     return handleCircleWalletCommand(trimmed, config, context)
   }
@@ -2540,7 +2582,7 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     const slug = normalizeAgentSlug(trimmed.split(/\s+/)[1])
     if (!slug) return { text: `Use /agent ${config.defaultAgentSlug}.` }
     const agent = getAgent(context.store, config, slug)
-    if (!agent) return { text: `Agent "${slug}" is not registered on Hash PayLink.` }
+    if (!agent) return createAgentWalletResult(slug, config)
     if (!canManageAgent(agent, config, context.userId)) return { text: `Only the owner of "${slug}" can provision its Agent Wallet.` }
     return agentWalletSetupResult(agent, config)
   }
