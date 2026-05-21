@@ -27,6 +27,7 @@ type BuildInput = {
 
 export type AgentRegistration = {
   slug: string
+  role?: 'seller' | 'buyer'
   endpointUrl: string
   priceUsdc: string
   agentWalletAddress?: string

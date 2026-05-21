@@ -42,6 +42,24 @@ export type StoreData = {
 }
 
 const DEFAULT_DATA: StoreData = { users: {} }
+const UPSTASH_REST_URL = (process.env.UPSTASH_REDIS_REST_URL ?? '').trim().replace(/\/+$/, '')
+const UPSTASH_REST_TOKEN = (process.env.UPSTASH_REDIS_REST_TOKEN ?? '').trim()
+const UPSTASH_STORE_KEY = (process.env.UPSTASH_PROFILE_STORE_KEY ?? 'hashpaylink:photon:profiles').trim()
+
+async function upstashCommand<T>(command: unknown[]): Promise<T | undefined> {
+  if (!UPSTASH_REST_URL || !UPSTASH_REST_TOKEN) return undefined
+  const response = await fetch(UPSTASH_REST_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${UPSTASH_REST_TOKEN}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(command),
+  })
+  if (!response.ok) throw new Error(`Upstash request failed: ${response.status}`)
+  const data = await response.json() as { result?: T }
+  return data.result
+}
 
 export class ProfileStore {
   private data: StoreData = DEFAULT_DATA
@@ -49,6 +67,11 @@ export class ProfileStore {
   constructor(private readonly filePath: string) {}
 
   async load() {
+    const remote = await this.loadFromUpstash()
+    if (remote) {
+      this.data = remote
+      return
+    }
     try {
       const raw = await readFile(this.filePath, 'utf8')
       this.data = JSON.parse(raw) as StoreData
@@ -115,5 +138,25 @@ export class ProfileStore {
   private async save() {
     await mkdir(dirname(this.filePath), { recursive: true })
     await writeFile(this.filePath, JSON.stringify(this.data, null, 2))
+    await this.saveToUpstash()
+  }
+
+  private async loadFromUpstash() {
+    try {
+      const raw = await upstashCommand<string>(['GET', UPSTASH_STORE_KEY])
+      if (!raw) return undefined
+      return JSON.parse(raw) as StoreData
+    } catch (error) {
+      console.warn('[store] Upstash load failed; using local file fallback.', error instanceof Error ? error.message : String(error))
+      return undefined
+    }
+  }
+
+  private async saveToUpstash() {
+    try {
+      await upstashCommand(['SET', UPSTASH_STORE_KEY, JSON.stringify(this.data)])
+    } catch (error) {
+      console.warn('[store] Upstash save failed; local file was saved.', error instanceof Error ? error.message : String(error))
+    }
   }
 }

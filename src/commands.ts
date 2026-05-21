@@ -60,7 +60,7 @@ const HELP_LINES = [
   '/streampay - stream USDC on Arc',
   '/polymarket - watchlist, alerts, funding',
   '/lphelp - LP scout and x402 research',
-  '/agenthelp - agent wallets and agent payments',
+  '/agenthelp - buyer and seller agents',
   '/settings - saved wallets and defaults',
 ]
 
@@ -113,7 +113,7 @@ const LP_HELP_LINES = [
   '/lp best - create paid LP report link',
   '/lp crypto - search crypto markets',
   '/lpmarket polymarket-url-or-slug - inspect one market',
-  '/lp x402 - agent buys live LP data',
+  '/lp x402 buyer-agent - buyer agent buys live LP data',
   '',
   'Agentic streaming:',
   '/agenticstream 7d you@example.com - stream daily LP research',
@@ -122,21 +122,38 @@ const LP_HELP_LINES = [
 const AGENT_HELP_LINES = [
   'Agents',
   '',
-  '1. Create wallet',
-  '/createagentwallet - open default agent wallet setup',
-  '/createagentwallet agent-name - setup custom agent wallet',
+  '/selleragent - agents that sell services',
+  '/buyeragent - agents that buy services',
   '',
-  '2. Register external agent',
-  '/registeragent agent-name agent-url price - add agent endpoint',
-  '/setagentwallet agent-name 0xWallet - attach wallet manually',
-  '/setagentstream agent-name 25 7d - set default stream',
+  'Simple split:',
+  'Seller receives USDC. Buyer spends USDC.',
+]
+
+const SELLER_AGENT_HELP_LINES = [
+  'Seller agents',
   '',
-  '3. Launch and use',
-  '/agents - list agents',
-  '/agent hashpaylink-agent - open agent dashboard',
-  '/askagent hashpaylink-agent your question - ask paid agent',
-  '/fundagent hashpaylink-agent 10 USDC on base - fund agent wallet',
-  '/agenticstream 7d you@example.com - stream LP research',
+  '/registeragent agent-name agent-url price - sell a service',
+  '/setagentwallet agent-name 0xWallet - set receiving wallet',
+  '/setagentprice agent-name 1 - set ask price',
+  '/setagentstream agent-name 25 7d - set stream price',
+  '/agent agent-name - open seller dashboard',
+  '/agents - list seller agents',
+  '',
+  'Example:',
+  '/buyagent hashpaylink-agent Analyze LP rewards',
+]
+
+const BUYER_AGENT_HELP_LINES = [
+  'Buyer agents',
+  '',
+  '/createbuyerwallet buyer-agent - connect buyer wallet',
+  '/buyer buyer-agent - open buyer dashboard',
+  '/fundagent buyer-agent 10 USDC on base - fund buyer wallet',
+  '/buyagent hashpaylink-agent your question - buy from seller',
+  '/lp x402 buyer-agent - buyer pays x402 LP API',
+  '',
+  'Note:',
+  'x402 needs Gateway funds. Normal tips do not.',
 ]
 
 const SETTINGS_HELP_LINES = [
@@ -681,6 +698,7 @@ function getAgentOwnerRecipientForNetwork(agent: AgentRegistration, store: Profi
 function defaultAgent(config: AppConfig): AgentRegistration {
   return {
     slug: config.defaultAgentSlug,
+    role: 'seller',
     endpointUrl: config.defaultAgentEndpointUrl,
     priceUsdc: config.defaultAgentPriceUsdc,
     streamPriceUsdc: config.defaultAgentStreamPriceUsdc,
@@ -691,6 +709,19 @@ function defaultAgent(config: AppConfig): AgentRegistration {
     status: 'active',
     createdAt: 0,
     verifiedAt: 0,
+  }
+}
+
+function buyerAgent(slug: string, userId: string, config: AppConfig): AgentRegistration {
+  return {
+    slug,
+    role: 'buyer',
+    endpointUrl: config.defaultAgentEndpointUrl,
+    priceUsdc: '0',
+    ownerUserId: userId,
+    status: 'active',
+    createdAt: Date.now(),
+    verifiedAt: Date.now(),
   }
 }
 
@@ -1631,10 +1662,23 @@ async function runX402LpScout(config: AppConfig, context: CommandContext, rawAge
   const found = getAgent(context.store, config, slug)
   if (!found) return { text: `Agent "${slug}" is not registered.` }
   const agent = await hydrateAgentWallet(found, config)
+  if (agent.role !== 'buyer') {
+    return {
+      text: withFooter([
+        'Use a buyer agent for x402 purchases.',
+        '',
+        `${agent.slug} is a seller/receiver agent.`,
+        '',
+        'Create or open a buyer wallet:',
+        '/createbuyerwallet buyer-agent',
+        '/lp x402 buyer-agent',
+      ]),
+    }
+  }
   if (!agent.agentWalletAddress) {
     return {
       text: withFooter([
-        'x402 LP Scout needs a Circle Agent Wallet first.',
+        'Buyer agent needs a Circle Agent Wallet first.',
         '',
         'Human pay model:',
         'Human pays agent. Agent answers.',
@@ -1642,7 +1686,7 @@ async function runX402LpScout(config: AppConfig, context: CommandContext, rawAge
         'x402 model:',
         'Agent pays API. API returns data. Agent answers human.',
         '',
-        `Open /agent ${agent.slug}, create the Circle Agent Wallet on the dashboard, then retry /lp x402.`,
+        `Open /buyer ${agent.slug}, create the Circle Agent Wallet on the dashboard, then retry /lp x402 ${agent.slug}.`,
       ]),
       buttonRows: [[{ text: 'Open Agent Dashboard', url: buildAgentProfileUrl(agent, config) }]],
     }
@@ -2151,6 +2195,14 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     return { text: withFooter(AGENT_HELP_LINES) }
   }
 
+  if (cmd === '/selleragent') {
+    return { text: withFooter(SELLER_AGENT_HELP_LINES) }
+  }
+
+  if (cmd === '/buyeragent') {
+    return { text: withFooter(BUYER_AGENT_HELP_LINES) }
+  }
+
   if (cmd === '/settings') {
     return { text: withFooter(SETTINGS_HELP_LINES) }
   }
@@ -2251,6 +2303,49 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     const slug = normalizeAgentSlug(trimmed.split(/\s+/)[1] ?? config.defaultAgentSlug)
     if (!slug) return { text: `Use /createagentwallet ${config.defaultAgentSlug}.` }
     return createAgentWalletResult(slug, config)
+  }
+
+  if (cmd === '/createbuyerwallet') {
+    const slug = normalizeAgentSlug(trimmed.split(/\s+/)[1])
+    if (!slug) return { text: 'Use /createbuyerwallet buyer-agent.' }
+    const existing = getAgent(context.store, config, slug)
+    if (existing && !canManageAgent(existing, config, context.userId)) {
+      return { text: `Agent name "${slug}" is already registered.` }
+    }
+    const agent = { ...(existing ?? buyerAgent(slug, context.userId, config)), role: 'buyer' as const }
+    await context.store.upsertAgent(agent)
+    return {
+      text: withFooter([
+        'Buyer agent ready',
+        '',
+        `Agent: ${agent.slug}`,
+        '',
+        'Open the dashboard and connect the Circle wallet that will spend.',
+        '',
+        'Use after funding:',
+        `/lp x402 ${agent.slug}`,
+      ]),
+      buttons: [{ text: 'Open Buyer Dashboard', url: buildAgentProfileUrl(agent, config) }],
+    }
+  }
+
+  if (cmd === '/buyer') {
+    const slug = normalizeAgentSlug(trimmed.split(/\s+/)[1])
+    if (!slug) return { text: 'Use /buyer buyer-agent.' }
+    const agent = getAgent(context.store, config, slug)
+    if (!agent) return { text: `Buyer agent "${slug}" is not registered. Use /createbuyerwallet ${slug}.` }
+    if (!canManageAgent(agent, config, context.userId)) return { text: `Only the owner of "${slug}" can open this buyer wallet.` }
+    return {
+      text: withFooter([
+        'Buyer agent',
+        '',
+        `Agent: ${agent.slug}`,
+        `Wallet: ${agent.agentWalletAddress ? shortAddress(agent.agentWalletAddress) : 'not connected'}`,
+        '',
+        'This wallet spends for x402/API purchases.',
+      ]),
+      buttons: [{ text: 'Open Buyer Dashboard', url: buildAgentProfileUrl(agent, config) }],
+    }
   }
 
   if (cmd === '/circlewallet') {
@@ -2436,7 +2531,21 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
 
   if (cmd === '/lp') {
     if (trimmed.split(/\s+/)[1]?.toLowerCase() === 'x402') {
-      return runX402LpScout(config, context, trimmed.split(/\s+/)[2])
+      const buyerSlug = trimmed.split(/\s+/)[2]
+      if (!buyerSlug) {
+        return {
+          text: withFooter([
+            'Choose the buyer agent wallet first.',
+            '',
+            'Use:',
+            '/lp x402 buyer-agent',
+            '',
+            'This is different from tipping Hash PayLink.',
+            `For a normal paid question use: /buyagent ${config.defaultAgentSlug} your question`,
+          ]),
+        }
+      }
+      return runX402LpScout(config, context, buyerSlug)
     }
     return createPaidLpRequest(trimmed, profile, config, context)
   }
@@ -2554,12 +2663,12 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
 
     const verified = await verifyAgentEndpoint(parsed, context.userId)
     if ('error' in verified) return { text: verified.error }
-    await context.store.upsertAgent(verified)
+    await context.store.upsertAgent({ ...verified, role: 'seller' })
     return {
       text: withFooter([
         'Agent registered',
         '',
-        `Name: ${verified.slug}`,
+        `Seller: ${verified.slug}`,
         `Ask price: ${verified.priceUsdc} USDC`,
         `Endpoint: ${verified.endpointUrl}`,
         '',
@@ -2660,11 +2769,11 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
   }
 
   if (cmd === '/agents') {
-    const agents = await Promise.all(listAgents(context.store, config).filter(agent => agent.status === 'active').slice(0, 10).map(agent => hydrateAgentWallet(agent, config)))
-    if (!agents.length) return { text: 'No verified Hash PayLink agents yet.' }
+    const agents = await Promise.all(listAgents(context.store, config).filter(agent => agent.status === 'active' && agent.role !== 'buyer').slice(0, 10).map(agent => hydrateAgentWallet(agent, config)))
+    if (!agents.length) return { text: 'No seller agents yet.' }
     return {
       text: withFooter([
-        'Agents',
+        'Seller agents',
         '',
         ...agents.flatMap(agent => [
           `${agent.slug}`,
@@ -2765,16 +2874,17 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     }
   }
 
-  if (cmd === '/askagent') {
+  if (cmd === '/askagent' || cmd === '/buyagent') {
     const parts = trimmed.split(/\s+/)
     const slug = normalizeAgentSlug(parts[1])
-    if (!slug) return { text: 'Use /askagent agent-name your question.' }
+    if (!slug) return { text: 'Use /buyagent seller-agent your question.' }
     const found = getAgent(context.store, config, slug)
     if (!found) return { text: `Agent "${slug}" is not registered on Hash PayLink.` }
     const agent = await hydrateAgentWallet(found, config)
+    if (agent.role === 'buyer') return { text: `Agent "${slug}" is a buyer agent. Use a seller agent like ${config.defaultAgentSlug}.` }
     if (agent.status !== 'active') return { text: `Agent "${slug}" is not active.` }
     const question = parts.slice(2).join(' ').trim()
-    if (!question) return { text: `Ask a question after the agent name. Example: /askagent ${slug} Analyze BTC risk.` }
+    if (!question) return { text: `Ask a question after the agent name. Example: /buyagent ${slug} Analyze BTC risk.` }
     if (question.length > MAX_QUESTION_LENGTH) return { text: `Question is too long. Keep it under ${MAX_QUESTION_LENGTH} characters.` }
 
     const network = userNetwork(profile, config)
