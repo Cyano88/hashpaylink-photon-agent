@@ -55,53 +55,30 @@ const POLYMARKET_AUTOPILOT_STOP_LOSS_PERCENT = 30
 const HELP_LINES = [
   'Hash PayLink Agent',
   '',
-  'Instant Payments',
-  '/request 10 USDC for design work',
-  '/status',
-  '/remind',
-  '/requests',
+  'Payments',
+  '/request 10 USDC for design',
+  '/stream 10 USDC to recipient@email.com for 7d',
   '',
-  'Polymarket Watchlist',
-  '/setpoly 0xPublicPolymarketWallet',
+  'Polymarket',
+  '/setpoly 0xWallet',
   '/poly',
-  '/setpolyfund 0xFundingWallet',
-  '/fund polymarket on base',
   '/setemail you@example.com',
-  '/polyalerts on',
-  '/polyalerts check',
   '',
-  'Paid Polymarket LP Scout',
+  'LP Scout',
   '/lp best',
-  '/lp crypto',
   '/lp x402',
-  '/lpmarket polymarket-url-or-slug',
-  '/agenticstream',
+  '/agenticstream 7d you@example.com',
   '',
-  'AI Paid Access',
-  '/askpaid your question',
-  '/verifyagent name https://agent.example/ask price=2',
-  '/agent name',
-  '/askagent name your question',
-  '/fundagent name 10 USDC on base',
-  '/streamagent name',
+  'Agents',
   '/agents',
+  '/agent hashpaylink-agent',
+  '/askpaid your question',
+  '/askagent hashpaylink-agent your question',
   '',
-  'Arc Streaming',
-  '/stream 100 USDC to 0xRecipient for 7d reason="research retainer"',
-  '/stream 100 USDC to recipient@email.com for 7d',
-  '/streamready <pending-id>',
-  '/streams',
-  '',
-  'Settings',
-  '/setevm 0xYourAddress',
-  '/setsol YourSolanaAddress',
-  '/network solana',
-  '/setpaid evm 0xHashPayLinkWallet',
-  '/setpaid price 1',
-  '/setlpprice 1',
-  '/paidsettings',
+  'Manage',
   '/me',
-  '/clear',
+  '/status',
+  '/requests',
 ]
 
 type RequestStats = {
@@ -828,20 +805,16 @@ function agentDashboard(agent: AgentRegistration, config: AppConfig): CommandRes
       'Hash PayLink Agent',
       '',
       `Agent: ${agent.slug}`,
-      `Agent Wallet: ${agent.agentWalletAddress ? shortAddress(agent.agentWalletAddress) : 'not set'}`,
+      `Wallet: ${agent.agentWalletAddress ? shortAddress(agent.agentWalletAddress) : 'not connected'}`,
       '',
-      'Modes:',
       `Ask once: ${agent.priceUsdc} USDC`,
       agent.streamPriceUsdc && agent.streamDuration
-        ? `Stream retainer: ${agent.streamPriceUsdc} USDC for ${agent.streamDuration}`
-        : 'Stream retainer: open dashboard',
-      'Fund treasury: Base or Arbitrum USDC',
+        ? `Stream: ${agent.streamPriceUsdc} USDC for ${agent.streamDuration}`
+        : 'Stream: dashboard setup',
       '',
-      'Open dashboard to create a Circle Agent Wallet, fund treasury, or start StreamPay.',
-      '',
-      `/askagent ${agent.slug} your question`,
-      `/fundagent ${agent.slug} 10 USDC on base`,
-      `/streamagent ${agent.slug}`,
+      agent.agentWalletAddress
+        ? 'Use the buttons below to fund, stream, or manage.'
+        : 'Open dashboard to connect the Circle Agent Wallet.',
     ]),
     buttonRows: buttonRows.length ? buttonRows : undefined,
   }
@@ -1019,17 +992,7 @@ async function handleAgentWalletCommand(trimmed: string, config: AppConfig, cont
     const listed = await runCircleCli(listArgs, { sessionKey })
     const walletAddress = listed.ok ? parseCircleWalletAddress(listed.output) : undefined
     if (!walletAddress) {
-      return {
-        text: withFooter([
-          'Circle login completed, but I could not read the wallet address automatically.',
-          '',
-          'Run this manually and paste the address:',
-          formatCliCommand(listArgs),
-          `/setagentwallet ${slug} 0xAgentWallet`,
-          '',
-          listed.output.slice(0, 1800),
-        ]),
-      }
+      return agentWalletSetupResult(agent, config)
     }
 
     const updated: AgentRegistration = {
@@ -1064,20 +1027,7 @@ async function handleAgentWalletCommand(trimmed: string, config: AppConfig, cont
   if (!agent) return { text: `Agent "${slug}" is not registered on Hash PayLink.` }
   if (!canManageAgent(agent, config, context.userId)) return { text: 'Only the agent owner can provision this wallet.' }
   if (!config.circleCliEnabled) {
-    return {
-      text: withFooter([
-        'Circle Agent Wallet provisioning is ready in the bot, but execution is disabled.',
-        '',
-        'Render setup needed:',
-        '1. Install Circle CLI: npm install -g @circle-fin/cli',
-        '2. Set CIRCLE_CLI_ENABLED=true',
-        '',
-        'Manual fallback:',
-        formatCliCommand(['wallet', 'login', email, ...(testnet ? ['--testnet'] : [])]),
-        formatCliCommand(['wallet', 'list', '--type', 'agent', '--chain', testnet ? 'ARC-TESTNET' : 'BASE']),
-        `/setagentwallet ${slug} 0xAgentWallet`,
-      ]),
-    }
+    return agentWalletSetupResult(agent, config)
   }
 
   const sessionKey = circleSessionKey(context.userId, slug)
@@ -1122,25 +1072,33 @@ async function handleAgentWalletCommand(trimmed: string, config: AppConfig, cont
   }
 }
 
-function agentWalletSetupText(agent: AgentRegistration) {
-  return withFooter([
-    'Circle Agent Wallet setup',
-    '',
-    `Agent: ${agent.slug}`,
-    '',
-    'Minimal Agent Stack path:',
-    '1. Install/login with Circle CLI.',
-    '2. Create an Arc testnet Agent Wallet.',
-    '3. Copy the 0x wallet address.',
-    '4. Register it here:',
-    `/setagentwallet ${agent.slug} 0xAgentWallet`,
-    '',
-    'Circle CLI docs:',
-    'https://developers.circle.com/agent-stack/circle-cli',
-    '',
-    'Agent Wallet quickstart:',
-    'https://developers.circle.com/agent-stack/agent-wallets/quickstart',
-  ])
+function agentWalletSetupResult(agent: AgentRegistration, config: AppConfig): CommandResult {
+  return {
+    text: withFooter([
+      'Connect Agent Wallet',
+      '',
+      `Agent: ${agent.slug}`,
+      '',
+      'Use the dashboard to create or reconnect the Circle Agent Wallet.',
+      '',
+      'Advanced fallback:',
+      `/setagentwallet ${agent.slug} 0xWallet`,
+    ]),
+    buttons: [{ text: 'Open Agent Dashboard', url: buildAgentProfileUrl(agent, config) }],
+  }
+}
+
+function missingAgentWalletResult(agent: AgentRegistration, config: AppConfig): CommandResult {
+  return {
+    text: withFooter([
+      'Agent wallet not connected',
+      '',
+      `Agent: ${agent.slug}`,
+      '',
+      'Open the dashboard to connect the Circle Agent Wallet, then retry.',
+    ]),
+    buttons: [{ text: 'Open Agent Dashboard', url: buildAgentProfileUrl(agent, config) }],
+  }
 }
 
 function paidAccessPayerHint(request: PaymentRequest) {
@@ -2359,13 +2317,7 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     const agent = await hydrateAgentWallet(found, config)
     if (agent.status !== 'active') return { text: `Agent "${agent.slug}" is not active.` }
     if (!agent.agentWalletAddress) {
-      return {
-        text: withFooter([
-          'Agentic Streaming needs the Hash PayLink Agent wallet first.',
-          '',
-          `Configure ${agent.slug} with /agentwalletsetup ${agent.slug}, then /setagentwallet ${agent.slug} 0xAgentWallet.`,
-        ]),
-      }
+      return missingAgentWalletResult(agent, config)
     }
 
     const stream = buildStreamRequest({
@@ -2491,11 +2443,11 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
 
   if (cmd === '/agentwalletsetup') {
     const slug = normalizeAgentSlug(trimmed.split(/\s+/)[1])
-    if (!slug) return { text: 'Use /agentwalletsetup agent-name.' }
+    if (!slug) return { text: `Use /agent ${config.defaultAgentSlug}.` }
     const agent = getAgent(context.store, config, slug)
     if (!agent) return { text: `Agent "${slug}" is not registered on Hash PayLink.` }
     if (!canManageAgent(agent, config, context.userId)) return { text: `Only the owner of "${slug}" can provision its Agent Wallet.` }
-    return { text: agentWalletSetupText(agent) }
+    return agentWalletSetupResult(agent, config)
   }
 
   if (cmd === '/setagentwallet') {
@@ -2583,21 +2535,16 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     if (!agents.length) return { text: 'No verified Hash PayLink agents yet.' }
     return {
       text: withFooter([
-        'Verified Hash PayLink agents',
+        'Agents',
         '',
         ...agents.flatMap(agent => [
           `${agent.slug}`,
-          `Agent Wallet: ${agent.agentWalletAddress ? shortAddress(agent.agentWalletAddress) : 'not set'}`,
-          `One-time: ${agent.priceUsdc} USDC`,
-          `/agent ${agent.slug}`,
-          `/askagent ${agent.slug} your question`,
-          agent.agentWalletAddress ? `/fundagent ${agent.slug} 10 USDC` : '',
+          `Wallet: ${agent.agentWalletAddress ? shortAddress(agent.agentWalletAddress) : 'not connected'}`,
+          `Ask: ${agent.priceUsdc} USDC`,
           agent.streamPriceUsdc && agent.streamDuration
             ? `Stream: ${agent.streamPriceUsdc} USDC for ${agent.streamDuration}`
-            : 'Stream: not set',
-          agent.streamPriceUsdc && agent.streamDuration
-            ? `/streamagent ${agent.slug}`
-            : '',
+            : 'Stream: dashboard setup',
+          `/agent ${agent.slug}`,
           '',
         ]).filter(Boolean).slice(0, -1),
       ]),
@@ -2614,7 +2561,7 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     const agent = await hydrateAgentWallet(found, config)
     if (agent.status !== 'active') return { text: `Agent "${slug}" is not active.` }
     if (!agent.agentWalletAddress) {
-      return { text: `Agent "${agent.slug}" has no Circle Agent Wallet configured yet. Ask the owner to run /setagentwallet ${agent.slug} 0xAgentWallet.` }
+      return missingAgentWalletResult(agent, config)
     }
 
     const partsForNetwork = [...parts]
@@ -2753,7 +2700,7 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     const ownerProfile = context.store.getUser(agent.ownerUserId)
     const recipient = agent.agentWalletAddress ?? ownerProfile.evmAddress
     if (!recipient) {
-      return { text: `Agent "${agent.slug}" has no Circle Agent Wallet configured. Ask the owner to run /agentwalletsetup ${agent.slug}, then /setagentwallet ${agent.slug} 0xAgentWallet.` }
+      return missingAgentWalletResult(agent, config)
     }
 
     const stream = buildStreamRequest({
