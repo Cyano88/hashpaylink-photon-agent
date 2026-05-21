@@ -1715,6 +1715,7 @@ async function runX402LpScout(config: AppConfig, context: CommandContext, rawAge
     body: JSON.stringify({
       action: 'pay-service',
       agentSlug: agent.slug,
+      sellerAgentSlug: config.defaultAgentSlug,
       serviceUrl: config.x402PolymarketScoutUrl,
       maxAmount: config.x402PolymarketScoutMaxAmount,
     }),
