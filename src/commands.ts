@@ -2723,6 +2723,7 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
         baseUrl: config.hashPayLinkBaseUrl,
         amount: parsed.amount,
         recipient: resolved.walletAddress,
+        recipientEmail: parsed.recipient,
         duration: parsed.duration,
         reason: parsed.reason,
       })
@@ -2793,6 +2794,7 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
       baseUrl: config.hashPayLinkBaseUrl,
       amount: pending.amount,
       recipient: resolved.walletAddress,
+      recipientEmail: pending.recipientEmail,
       duration: pending.duration,
       reason: pending.reason,
     })

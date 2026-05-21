@@ -43,6 +43,7 @@ export type StreamRequest = {
   id: string
   amount: string
   recipient: string
+  recipientEmail?: string
   duration: string
   reason: string
   streamUrl: string
@@ -102,6 +103,7 @@ export function buildStreamRequest(input: {
   baseUrl: string
   amount: string
   recipient: string
+  recipientEmail?: string
   duration: string
   reason: string
 }): StreamRequest {
@@ -111,6 +113,7 @@ export function buildStreamRequest(input: {
   params.set('app', 'streampay')
   params.set('amount', input.amount)
   params.set('recipient', input.recipient)
+  if (input.recipientEmail) params.set('recipientEmail', input.recipientEmail)
   params.set('duration', input.duration)
   params.set('reason', input.reason)
   params.set('src', 'telegram')
@@ -121,6 +124,7 @@ export function buildStreamRequest(input: {
     id,
     amount: input.amount,
     recipient: input.recipient,
+    recipientEmail: input.recipientEmail,
     duration: input.duration,
     reason: input.reason,
     streamUrl: `${base}/?${params.toString()}`,
