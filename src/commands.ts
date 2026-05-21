@@ -55,30 +55,101 @@ const POLYMARKET_AUTOPILOT_STOP_LOSS_PERCENT = 30
 const HELP_LINES = [
   'Hash PayLink Agent',
   '',
+  'Choose a section:',
+  '/payments - collect and track USDC',
+  '/streampay - stream USDC on Arc',
+  '/polymarket - watchlist, alerts, funding',
+  '/lphelp - LP scout and x402 research',
+  '/agenthelp - agent wallets and agent payments',
+  '/settings - saved wallets and defaults',
+]
+
+const PAYMENTS_HELP_LINES = [
   'Payments',
+  '',
   '/request 10 USDC for design',
-  '/stream 10 USDC to recipient@email.com for 7d',
+  '/status',
+  '/remind',
+  '/requests',
+  '/answer payer-name',
   '',
+  'Networks:',
+  '/network base',
+  '/network arbitrum',
+  '/network solana',
+]
+
+const STREAMPAY_HELP_LINES = [
+  'StreamPay',
+  '',
+  '/stream 10 USDC to 0xWallet for 7d reason="research"',
+  '/stream 10 USDC to email@example.com for 7d',
+  '/streamready pending-id',
+  '/streams',
+  '',
+  'Telegram links open Circle Smart Wallet on Arc.',
+]
+
+const POLYMARKET_HELP_LINES = [
   'Polymarket',
-  '/setpoly 0xWallet',
+  '',
+  '/setpoly 0xPublicWallet',
   '/poly',
+  '/setpolyfund 0xFundingWallet',
+  '/fund polymarket on base',
+  '/fund polymarket 2 on base',
+  '',
+  'Alerts:',
   '/setemail you@example.com',
-  '',
+  '/polyalerts on',
+  '/polyalerts check',
+  '/polyalerts status',
+  '/polyalerts off',
+]
+
+const LP_HELP_LINES = [
   'LP Scout',
-  '/lp best',
-  '/lp x402',
-  '/agenticstream 7d you@example.com',
   '',
+  '/lp best',
+  '/lp crypto',
+  '/lpmarket polymarket-url-or-slug',
+  '/lp x402',
+  '',
+  'Agentic streaming:',
+  '/agenticstream 7d you@example.com',
+]
+
+const AGENT_HELP_LINES = [
   'Agents',
+  '',
   '/agents',
   '/agent hashpaylink-agent',
-  '/askpaid your question',
   '/askagent hashpaylink-agent your question',
+  '/fundagent hashpaylink-agent 10 USDC on base',
+  '/streamagent hashpaylink-agent',
   '',
-  'Manage',
+  'Agent owners:',
+  '/verifyagent name https://agent.example/ask price=2',
+  '/agentwallet name you@example.com testnet',
+  '/agentwallet code OTP',
+  '/setagentwallet name 0xWallet',
+  '/setagentstream name 25 7d',
+]
+
+const SETTINGS_HELP_LINES = [
+  'Settings',
+  '',
   '/me',
-  '/status',
-  '/requests',
+  '/setevm 0xWallet',
+  '/setsol SolanaWallet',
+  '/network base',
+  '/network arbitrum',
+  '/network solana',
+  '/setpaid evm 0xWallet',
+  '/setpaid price 1',
+  '/setlpprice 1',
+  '/paidsettings',
+  '/clear',
 ]
 
 type RequestStats = {
@@ -2026,6 +2097,30 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
         `Current default network: ${userNetwork(profile, config)}`,
       ]),
     }
+  }
+
+  if (cmd === '/payments') {
+    return { text: withFooter(PAYMENTS_HELP_LINES) }
+  }
+
+  if (cmd === '/streampay') {
+    return { text: withFooter(STREAMPAY_HELP_LINES) }
+  }
+
+  if (cmd === '/polymarket') {
+    return { text: withFooter(POLYMARKET_HELP_LINES) }
+  }
+
+  if (cmd === '/lphelp') {
+    return { text: withFooter(LP_HELP_LINES) }
+  }
+
+  if (cmd === '/agenthelp') {
+    return { text: withFooter(AGENT_HELP_LINES) }
+  }
+
+  if (cmd === '/settings') {
+    return { text: withFooter(SETTINGS_HELP_LINES) }
   }
 
   if (cmd === '/setevm') {
