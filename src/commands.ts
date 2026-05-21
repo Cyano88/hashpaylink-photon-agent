@@ -67,25 +67,25 @@ const HELP_LINES = [
 const PAYMENTS_HELP_LINES = [
   'Payments',
   '',
-  '/request 10 USDC for design',
-  '/status',
-  '/remind',
-  '/requests',
-  '/answer payer-name',
+  '/request 10 USDC for design - create a payment link',
+  '/status - check latest payment',
+  '/remind - resend latest payment link',
+  '/requests - show recent payment links',
+  '/answer payer-name - unlock paid answer',
   '',
   'Networks:',
-  '/network base',
-  '/network arbitrum',
-  '/network solana',
+  '/network base - use Base by default',
+  '/network arbitrum - use Arbitrum by default',
+  '/network solana - use Solana by default',
 ]
 
 const STREAMPAY_HELP_LINES = [
   'StreamPay',
   '',
-  '/stream 10 USDC to 0xWallet for 7d reason="research"',
-  '/stream 10 USDC to email@example.com for 7d',
-  '/streamready pending-id',
-  '/streams',
+  '/stream 10 USDC to 0xWallet for 7d reason="research" - create stream',
+  '/stream 10 USDC to email@example.com for 7d - stream to email',
+  '/streamready pending-id - check email recipient wallet',
+  '/streams - show recent streams',
   '',
   'Telegram links open Circle Smart Wallet on Arc.',
 ]
@@ -93,70 +93,66 @@ const STREAMPAY_HELP_LINES = [
 const POLYMARKET_HELP_LINES = [
   'Polymarket',
   '',
-  '/setpoly 0xPublicWallet',
-  '/poly',
-  '/setpolyfund 0xFundingWallet',
-  '/fund polymarket on base',
-  '/fund polymarket 2 on base',
+  '/setpoly 0xPublicWallet - save watchlist wallet',
+  '/poly - view positions and risk',
+  '/setpolyfund 0xFundingWallet - save funding wallet',
+  '/fund polymarket on base - create funding link',
+  '/fund polymarket 2 on base - fund exact amount',
   '',
   'Alerts:',
-  '/setemail you@example.com',
-  '/polyalerts on',
-  '/polyalerts check',
-  '/polyalerts status',
-  '/polyalerts off',
+  '/setemail you@example.com - save alert email',
+  '/polyalerts on - turn alerts on',
+  '/polyalerts check - run check now',
+  '/polyalerts status - view alert setup',
+  '/polyalerts off - turn alerts off',
 ]
 
 const LP_HELP_LINES = [
   'LP Scout',
   '',
-  '/lp best',
-  '/lp crypto',
-  '/lpmarket polymarket-url-or-slug',
-  '/lp x402',
+  '/lp best - create paid LP report link',
+  '/lp crypto - search crypto markets',
+  '/lpmarket polymarket-url-or-slug - inspect one market',
+  '/lp x402 - agent buys live LP data',
   '',
   'Agentic streaming:',
-  '/agenticstream 7d you@example.com',
+  '/agenticstream 7d you@example.com - stream daily LP research',
 ]
 
 const AGENT_HELP_LINES = [
   'Agents',
   '',
   '1. Create wallet',
-  '/createagentwallet name',
-  '/agentwalletsetup name',
+  '/createagentwallet - open default agent wallet setup',
+  '/createagentwallet agent-name - setup custom agent wallet',
   '',
-  '2. Register agent',
-  '/verifyagent name https://agent.example/ask price=2',
-  '/setagentwallet name 0xWallet',
-  '/setagentstream name 25 7d',
+  '2. Register external agent',
+  '/registeragent agent-name agent-url price - add agent endpoint',
+  '/setagentwallet agent-name 0xWallet - attach wallet manually',
+  '/setagentstream agent-name 25 7d - set default stream',
   '',
   '3. Launch and use',
-  '/agents',
-  '/agent name',
-  '/askagent name your question',
-  '/fundagent name 10 USDC on base',
-  '/streamagent name',
-  '',
-  'Advanced OTP fallback',
-  '/agentwallet name you@example.com testnet',
-  '/agentwallet code OTP',
+  '/agents - list agents',
+  '/agent hashpaylink-agent - open agent dashboard',
+  '/askagent hashpaylink-agent your question - ask paid agent',
+  '/fundagent hashpaylink-agent 10 USDC on base - fund agent wallet',
+  '/agenticstream 7d you@example.com - stream LP research',
 ]
 
 const SETTINGS_HELP_LINES = [
   'Settings',
   '',
-  '/me',
-  '/setevm 0xWallet',
-  '/setsol SolanaWallet',
-  '/network base',
-  '/network arbitrum',
-  '/network solana',
-  '/setpaid evm 0xWallet',
-  '/setpaid price 1',
-  '/setlpprice 1',
-  '/paidsettings',
-  '/clear',
+  '/me - view saved profile',
+  '/setevm 0xWallet - save EVM wallet',
+  '/setsol SolanaWallet - save Solana wallet',
+  '/network base - set default network',
+  '/network arbitrum - set default network',
+  '/network solana - set default network',
+  '/setpaid evm 0xWallet - admin paid AI wallet',
+  '/setpaid price 1 - admin paid AI price',
+  '/setlpprice 1 - admin LP price',
+  '/paidsettings - view paid settings',
+  '/clear - clear saved bot messages',
 ]
 
 type RequestStats = {
@@ -360,7 +356,7 @@ function parseAgentRegistrationArgs(text: string): ParsedAgentRegistration {
   const endpointUrl = parts[2]?.trim()
   const priceUsdc = parsePriceFlag(parts) ?? parseUsdcAmount(parts[3])
   if (!slug || !endpointUrl || !priceUsdc) {
-    return { error: 'Use /verifyagent marketbot https://api.example.com/ask price=2' }
+    return { error: 'Use /registeragent agent-name https://api.example.com/ask 2' }
   }
   return { slug, endpointUrl, priceUsdc }
 }
@@ -2548,7 +2544,7 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     return answerPaidAccessRequest(parsed.request, parsed.payer, config, context)
   }
 
-  if (cmd === '/verifyagent') {
+  if (cmd === '/registeragent' || cmd === '/verifyagent') {
     const parsed = parseAgentRegistrationArgs(trimmed)
     if ('error' in parsed) return { text: parsed.error }
     const existing = getAgent(context.store, config, parsed.slug)
@@ -2561,19 +2557,15 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     await context.store.upsertAgent(verified)
     return {
       text: withFooter([
-        'Agent verified on Hash PayLink.',
+        'Agent registered',
         '',
         `Name: ${verified.slug}`,
-        `One-time price: ${verified.priceUsdc} USDC`,
+        `Ask price: ${verified.priceUsdc} USDC`,
         `Endpoint: ${verified.endpointUrl}`,
         '',
-        'Users can now call:',
-        `/askagent ${verified.slug} your question`,
-        '',
-        'Agent dashboard:',
+        'Next:',
+        `/createagentwallet ${verified.slug}`,
         `/agent ${verified.slug}`,
-        '',
-        'Use the dashboard to create a Circle Agent Wallet, fund treasury, or start StreamPay.',
       ]),
     }
   }
