@@ -48,6 +48,11 @@ export type StreamRequest = {
   reason: string
   streamUrl: string
   createdAt: number
+  mode?: string
+  service?: string
+  reportEmail?: string
+  agentSlug?: string
+  amountPerDay?: string
 }
 
 export type PendingStreamRequest = {
@@ -106,6 +111,11 @@ export function buildStreamRequest(input: {
   recipientEmail?: string
   duration: string
   reason: string
+  mode?: string
+  service?: string
+  reportEmail?: string
+  agentSlug?: string
+  amountPerDay?: string
 }): StreamRequest {
   const id = createRequestId()
   const base = input.baseUrl.replace(/\/+$/, '')
@@ -119,6 +129,11 @@ export function buildStreamRequest(input: {
   params.set('src', 'telegram')
   params.set('wallet', 'circle')
   params.set('id', id)
+  if (input.mode) params.set('mode', input.mode)
+  if (input.service) params.set('service', input.service)
+  if (input.reportEmail) params.set('reportEmail', input.reportEmail)
+  if (input.agentSlug) params.set('agent', input.agentSlug)
+  if (input.amountPerDay) params.set('amountPerDay', input.amountPerDay)
 
   return {
     id,
@@ -129,6 +144,11 @@ export function buildStreamRequest(input: {
     reason: input.reason,
     streamUrl: `${base}/?${params.toString()}`,
     createdAt: Date.now(),
+    mode: input.mode,
+    service: input.service,
+    reportEmail: input.reportEmail,
+    agentSlug: input.agentSlug,
+    amountPerDay: input.amountPerDay,
   }
 }
 

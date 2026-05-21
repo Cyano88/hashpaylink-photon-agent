@@ -75,6 +75,7 @@ const HELP_LINES = [
   '/lp crypto',
   '/lp x402',
   '/lpmarket polymarket-url-or-slug',
+  '/agenticstream',
   '',
   'AI Paid Access',
   '/askpaid your question',
@@ -125,6 +126,10 @@ type ParsedStreamArgs =
 
 type ParsedAgentStreamArgs =
   | { slug: string; amount: string; duration: string; reason: string }
+  | { error: string }
+
+type ParsedAgenticStreamArgs =
+  | { days: number; duration: string; totalAmount: string; amountPerDay: string; reportEmail: string }
   | { error: string }
 
 type ResolvedCircleRecipientWallet =
@@ -359,6 +364,45 @@ function parseAgentStreamArgs(text: string, agent?: AgentRegistration): ParsedAg
     amount,
     duration,
     reason: (reason || `Agent retainer: ${slug}`).slice(0, MAX_MEMO_LENGTH),
+  }
+}
+
+function formatUsdcDecimal(value: number) {
+  return value.toFixed(6).replace(/\.?0+$/, '')
+}
+
+function parseAgenticStreamArgs(text: string, profile: UserProfile): ParsedAgenticStreamArgs {
+  const parts = text.trim().split(/\s+/).slice(1)
+  const amountPerDay = '0.01'
+  let days = 7
+  let reportEmail = profile.email ?? ''
+
+  for (const part of parts) {
+    const lower = part.toLowerCase()
+    if (/^\d+d$/.test(lower)) {
+      days = Number(lower.slice(0, -1))
+      continue
+    }
+    if (/^\d+$/.test(lower)) {
+      days = Number(lower)
+      continue
+    }
+    if (isEmail(part)) reportEmail = part.toLowerCase()
+  }
+
+  if (!Number.isInteger(days) || days < 1 || days > 30) {
+    return { error: 'Use /agenticstream 7d you@example.com. Duration must be 1d to 30d.' }
+  }
+  if (!reportEmail || !isEmail(reportEmail)) {
+    return { error: 'Use /agenticstream 7d you@example.com, or save an email first with /setemail you@example.com.' }
+  }
+
+  return {
+    days,
+    duration: `${days}d`,
+    amountPerDay,
+    totalAmount: formatUsdcDecimal(Number(amountPerDay) * days),
+    reportEmail,
   }
 }
 
@@ -2304,6 +2348,59 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
       return runX402LpScout(config, context, trimmed.split(/\s+/)[2])
     }
     return createPaidLpRequest(trimmed, profile, config, context)
+  }
+
+  if (cmd === '/agenticstream') {
+    const parsed = parseAgenticStreamArgs(trimmed, profile)
+    if ('error' in parsed) return { text: parsed.error }
+
+    const found = getAgent(context.store, config, config.defaultAgentSlug)
+    if (!found) return { text: `Agent "${config.defaultAgentSlug}" is not registered.` }
+    const agent = await hydrateAgentWallet(found, config)
+    if (agent.status !== 'active') return { text: `Agent "${agent.slug}" is not active.` }
+    if (!agent.agentWalletAddress) {
+      return {
+        text: withFooter([
+          'Agentic Streaming needs the Hash PayLink Agent wallet first.',
+          '',
+          `Configure ${agent.slug} with /agentwalletsetup ${agent.slug}, then /setagentwallet ${agent.slug} 0xAgentWallet.`,
+        ]),
+      }
+    }
+
+    const stream = buildStreamRequest({
+      baseUrl: config.hashPayLinkBaseUrl,
+      amount: parsed.totalAmount,
+      recipient: agent.agentWalletAddress,
+      duration: parsed.duration,
+      reason: 'Polymarket LP research',
+      mode: 'agentic-streaming',
+      service: 'polymarket-lp',
+      reportEmail: parsed.reportEmail,
+      agentSlug: agent.slug,
+      amountPerDay: parsed.amountPerDay,
+    })
+    await context.store.updateUser(context.userId, {
+      email: parsed.reportEmail,
+      recentStreams: [stream, ...(profile.recentStreams ?? [])].slice(0, 5),
+    })
+    return {
+      text: withFooter([
+        'Agentic Streaming link created',
+        '',
+        'Service: Polymarket LP Research',
+        `Agent: ${agent.slug}`,
+        `Rate: ${parsed.amountPerDay} USDC/day`,
+        `Duration: ${stream.duration}`,
+        `Total stream: ${stream.amount} USDC`,
+        `Report email: ${parsed.reportEmail}`,
+        `Recipient: ${shortAddress(stream.recipient)}`,
+        '',
+        'Open StreamPay to fund and deploy the Arc USDC stream.',
+        'After deployment, Hash PayLink records this as the LP research subscription.',
+      ]),
+      buttons: [{ text: 'Open Agentic Streaming', url: stream.streamUrl }],
+    }
   }
 
   if (cmd === '/lpmarket') {
