@@ -28,7 +28,7 @@ export type CommandContext = {
 
 const requests = new Map<string, PaymentRequest>()
 const latestRequestByUser = new Map<string, string>()
-const FOOTER = 'Built for Photon - Powered by Hash PayLink'
+const FOOTER = '# Powered by Hash PayLink'
 const MAX_USDC_WHOLE_DIGITS = 12
 const POLYMARKET_MIN_FUNDING_USDC = 4
 const MAX_MEMO_LENGTH = 180
@@ -53,58 +53,50 @@ const POLYMARKET_AUTOPILOT_TEST_CAP_USDC = 5
 const POLYMARKET_AUTOPILOT_STOP_LOSS_PERCENT = 30
 
 const HELP_LINES = [
-  'Hash PayLink Agent',
+  'Hash PayLink',
   '',
-  'Choose a section:',
-  '/payments - collect and track USDC',
-  '/streampay - stream USDC on Arc',
-  '/polymarket - watchlist, alerts, funding',
-  '/lphelp - LP scout and x402 research',
-  '/agenthelp - buyer and seller agents',
+  'USDC payments and agent commerce from Telegram.',
+  '',
+  '/pay - create payment links',
+  '/stream - StreamPay on Arc',
+  '/agent - buyer and seller agents',
+  '/polymarket - LP Scout and daily reports',
   '/settings - saved wallets and defaults',
 ]
 
 const PAYMENTS_HELP_LINES = [
   'Payments',
   '',
-  '/request 10 USDC for design - create a payment link',
-  '/status - check latest payment',
-  '/remind - resend latest payment link',
-  '/requests - show recent payment links',
+  '/request 10 USDC for design - create link',
+  '/status - check latest link',
+  '/remind - resend latest link',
+  '/requests - recent links',
   '/answer payer-name - unlock paid answer',
   '',
-  'Networks:',
-  '/network base - use Base by default',
-  '/network arbitrum - use Arbitrum by default',
-  '/network solana - use Solana by default',
+  '/network base - set default network',
 ]
 
 const STREAMPAY_HELP_LINES = [
   'StreamPay',
   '',
-  '/stream 10 USDC to 0xWallet for 7d reason="research" - create stream',
+  '/stream 10 USDC to 0xWallet for 7d - new stream',
   '/stream 10 USDC to email@example.com for 7d - stream to email',
-  '/streamready pending-id - check email recipient wallet',
-  '/streams - show recent streams',
+  '/streams - running and recent streams',
+  '/streamready pending-id - check email wallet',
   '',
-  'Telegram links open Circle Smart Wallet on Arc.',
+  'Streams run on Arc with Circle Smart Wallet.',
 ]
 
 const POLYMARKET_HELP_LINES = [
   'Polymarket',
   '',
-  '/setpoly 0xPublicWallet - save watchlist wallet',
-  '/poly - view positions and risk',
-  '/setpolyfund 0xFundingWallet - save funding wallet',
-  '/fund polymarket on base - create funding link',
-  '/fund polymarket 2 on base - fund exact amount',
+  '/lp x402 buyer-agent - one-time LP Scout',
+  '/agenticstream 7d you@example.com - daily LP reports',
+  '/poly - view saved public positions',
   '',
-  'Alerts:',
-  '/setemail you@example.com - save alert email',
-  '/polyalerts on - turn alerts on',
-  '/polyalerts check - run check now',
-  '/polyalerts status - view alert setup',
-  '/polyalerts off - turn alerts off',
+  'Optional watchlist:',
+  '/setpoly 0xPublicWallet',
+  '/polyalerts on',
 ]
 
 const LP_HELP_LINES = [
@@ -122,10 +114,11 @@ const LP_HELP_LINES = [
 const AGENT_HELP_LINES = [
   'Agents',
   '',
-  '/selleragent - agents that sell services',
-  '/buyeragent - agents that buy services',
+  '/buyeragent - buy services',
+  '/selleragent - sell services',
+  '/agent hashpaylink-agent - open dashboard',
+  '/agents - seller directory',
   '',
-  'Simple split:',
   'Seller receives USDC. Buyer spends USDC.',
 ]
 
@@ -266,6 +259,22 @@ type PolymarketLpOpportunity = {
 
 function withFooter(lines: string[]) {
   return [...lines, '', FOOTER].join('\n')
+}
+
+function compactUrl(raw: string) {
+  try {
+    const url = new URL(raw)
+    url.search = ''
+    url.hash = ''
+    return url.toString().replace(/^https?:\/\/(www\.)?/, '')
+  } catch {
+    return raw
+  }
+}
+
+function compactPolymarketUrl(raw: unknown) {
+  if (typeof raw !== 'string' || !raw.trim()) return ''
+  return compactUrl(raw.trim())
 }
 
 function parseNetwork(raw: string | undefined, fallback: Network): Network {
@@ -1544,7 +1553,7 @@ function formatLpOpportunity(opportunity: PolymarketLpOpportunity, index?: numbe
     `Suggested maker quote: YES ${formatCents(opportunity.suggestedYesBid)} / NO ${formatCents(opportunity.suggestedNoBid)}`,
     `LP execution risk: ${opportunity.lpExecutionRisk} | Outcome risk: ${opportunity.outcomeRisk}`,
     `Reward check: ${opportunity.eligible === true ? 'inside reward spread' : opportunity.eligible === false ? 'outside reward spread' : 'needs live book review'}`,
-    opportunity.slug ? `Market: https://polymarket.com/market/${opportunity.slug}` : undefined,
+    opportunity.slug ? `Link: polymarket.com/market/${opportunity.slug}` : undefined,
   ].filter((line): line is string => Boolean(line))
 }
 
@@ -1700,7 +1709,7 @@ async function runX402LpScout(config: AppConfig, context: CommandContext, rawAge
         '',
         'What this will do:',
         `Agent wallet ${shortAddress(agent.agentWalletAddress)} pays ${config.x402PolymarketScoutMaxAmount} USDC max for:`,
-        config.x402PolymarketScoutUrl,
+        compactUrl(config.x402PolymarketScoutUrl),
       ]),
     }
   }
@@ -1759,12 +1768,6 @@ async function runX402LpScout(config: AppConfig, context: CommandContext, rawAge
   }
   const parsed = data.response
   const opportunities = Array.isArray(parsed?.scout?.opportunities) ? parsed.scout.opportunities.slice(0, 3) : []
-  const marketButtons = opportunities
-    .map((opportunity: Record<string, unknown>, index: number) => {
-      const url = typeof opportunity.marketUrl === 'string' ? opportunity.marketUrl : ''
-      return url ? { text: `View market ${index + 1}`, url } : undefined
-    })
-    .filter((button): button is { text: string; url: string } => Boolean(button))
   const opportunityLines = opportunities.flatMap((opportunity: Record<string, unknown>, index: number) => {
     const title = typeof opportunity.title === 'string' ? opportunity.title : 'Polymarket reward market'
     const dailyReward = typeof opportunity.dailyReward === 'number' ? `${formatUsdc(opportunity.dailyReward)} USDC/day` : 'reward n/a'
@@ -1774,13 +1777,15 @@ async function runX402LpScout(config: AppConfig, context: CommandContext, rawAge
     const yesBid = typeof opportunity.suggestedYesBid === 'number' ? formatCents(opportunity.suggestedYesBid) : 'n/a'
     const noBid = typeof opportunity.suggestedNoBid === 'number' ? formatCents(opportunity.suggestedNoBid) : 'n/a'
     const risk = typeof opportunity.lpExecutionRisk === 'string' ? opportunity.lpExecutionRisk : 'unknown'
+    const marketUrl = compactPolymarketUrl(opportunity.marketUrl)
     return [
       `${index + 1}. ${title.slice(0, 90)}`,
       `Reward: ${dailyReward} | Min quote: ${minSize}`,
       `Spread: ${liveSpread} / max ${maxSpread}`,
       `Quote: YES ${yesBid} / NO ${noBid} | Risk: ${risk}`,
+      marketUrl ? `Link: ${marketUrl}` : undefined,
       '',
-    ]
+    ].filter((line): line is string => typeof line === 'string')
   }).slice(0, -1)
   const topOpportunity = opportunities[0] as Record<string, unknown> | undefined
   const topTitle = typeof topOpportunity?.title === 'string' ? topOpportunity.title.slice(0, 82) : 'top ranked market'
@@ -1818,7 +1823,6 @@ async function runX402LpScout(config: AppConfig, context: CommandContext, rawAge
       'Next: re-check depth, then quote only inside reward spread.',
       parsed?.receipt?.provider ? `Receipt: ${parsed.receipt.provider}` : 'Receipt: Circle Gateway x402',
     ].filter((line): line is string => typeof line === 'string')),
-    buttonRows: marketButtons.length ? [marketButtons] : undefined,
   }
 }
 
@@ -2176,11 +2180,11 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     }
   }
 
-  if (cmd === '/payments') {
+  if (cmd === '/pay' || cmd === '/payments') {
     return { text: withFooter(PAYMENTS_HELP_LINES) }
   }
 
-  if (cmd === '/streampay') {
+  if ((cmd === '/stream' && trimmed.split(/\s+/).length === 1) || cmd === '/streampay') {
     return { text: withFooter(STREAMPAY_HELP_LINES) }
   }
 
@@ -2192,7 +2196,7 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     return { text: withFooter(LP_HELP_LINES) }
   }
 
-  if (cmd === '/agenthelp') {
+  if ((cmd === '/agent' && trimmed.split(/\s+/).length === 1) || cmd === '/agenthelp') {
     return { text: withFooter(AGENT_HELP_LINES) }
   }
 

@@ -4,7 +4,7 @@ Photon-ready Telegram agent for creating and tracking Hash PayLink USDC multi-pa
 
 The agent does not custody funds, sign payments, or hold private keys. It creates Hash PayLink payment actions and sends compact Pay/Track buttons back to the user in Telegram. Payment execution remains inside Hash PayLink.
 
-Bot replies include the footer `Built for Photon - Powered by Hash PayLink` to keep Photon positioning visible while staying honest about the current Telegram transport.
+Bot replies include the footer `# Powered by Hash PayLink`.
 
 ## Commands
 
