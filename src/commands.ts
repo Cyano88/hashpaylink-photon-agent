@@ -28,7 +28,7 @@ export type CommandContext = {
 
 const requests = new Map<string, PaymentRequest>()
 const latestRequestByUser = new Map<string, string>()
-const FOOTER = '# Powered by Hash PayLink'
+const FOOTER = 'Powered by Hash PayLink'
 const MAX_USDC_WHOLE_DIGITS = 12
 const POLYMARKET_MIN_FUNDING_USDC = 4
 const MAX_MEMO_LENGTH = 180
