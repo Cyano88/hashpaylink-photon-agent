@@ -17,7 +17,10 @@ type TelegramUpdate = {
   update_id: number
   message?: {
     message_id: number
-    chat: { id: number }
+    chat: {
+      id: number
+      type?: 'private' | 'group' | 'supergroup' | 'channel'
+    }
     from?: {
       id: number
       username?: string
@@ -90,8 +93,14 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
     return data.result
   }
 
+  function dashboardBaseUrl() {
+    const configured = config.hashPayLinkBaseUrl.trim().replace(/\/+$/, '')
+    if (!configured) return 'https://hashpaylink.com'
+    return /^https?:\/\//i.test(configured) ? configured : `https://${configured}`
+  }
+
   function buildPaymentLinksUrl(options: { mode?: 'group' | 'person'; target?: string; username?: string } = {}) {
-    const base = config.hashPayLinkBaseUrl.replace(/\/+$/, '')
+    const base = dashboardBaseUrl()
     const params = new URLSearchParams({ open: '1' })
     if (options.mode) params.set('mode', options.mode)
     if (options.target) params.set('target', options.target)
@@ -99,14 +108,18 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
     return `${base}/telegram/payment-links?${params.toString()}`
   }
 
-  function buildDashboardLauncher(username?: string): TelegramOutbound {
+  function buildDashboardLauncher(username?: string, withButton = true): TelegramOutbound {
+    const url = buildPaymentLinksUrl({ username })
+    const text = [
+      'Hash PayLink',
+      '',
+      'Create payment links, manage agent wallets, market tools, and StreamPay from the web dashboard.',
+      ...(withButton ? [] : ['', url]),
+    ].join('\n')
+
     return {
-      text: [
-        'Hash PayLink',
-        '',
-        'Create payment links, manage agent wallets, market tools, and StreamPay from the web dashboard.',
-      ].join('\n'),
-      buttons: [{ text: 'Open Hash PayLink', url: buildPaymentLinksUrl({ username }) }],
+      text,
+      buttons: withButton ? [{ text: 'Open Hash PayLink', url }] : undefined,
     }
   }
 
@@ -138,6 +151,15 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
       }
     }
     return callTelegram<TelegramMessage>('sendMessage', body)
+  }
+
+  async function sendDashboardLauncher(chatId: number, username?: string) {
+    try {
+      return await sendMessage(chatId, buildDashboardLauncher(username))
+    } catch (err) {
+      console.error(`Telegram dashboard button failed: ${err instanceof Error ? err.message : err}`)
+      return sendMessage(chatId, buildDashboardLauncher(username, false))
+    }
   }
 
   function cleanInlineValue(value: string | undefined) {
@@ -204,7 +226,8 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
         if (!chatId || !userId || !text) continue
 
         const username = message.from?.username ?? message.from?.first_name
-        const sent = await sendMessage(chatId, buildDashboardLauncher(username))
+        console.log(`Telegram message received: chat=${message.chat.type ?? 'unknown'} command=${text.trim().split(/\s+/, 1)[0] ?? ''}`)
+        const sent = await sendDashboardLauncher(chatId, username)
         await store.addBotMessage(String(userId), String(chatId), sent.message_id)
       }
     } catch (err) {
