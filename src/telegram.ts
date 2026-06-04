@@ -69,6 +69,12 @@ type TelegramInlineResultArticle = {
   }
 }
 
+const DASHBOARD_MESSAGE = [
+  'Hash PayLink',
+  '',
+  'Open the dashboard to create payment links and share them back into Telegram.',
+].join('\n')
+
 export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
   if (!config.telegramEnabled) {
     console.log('Telegram polling disabled.')
@@ -121,9 +127,7 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
   function buildDashboardLauncher(username?: string, withButton = true): TelegramOutbound {
     const url = buildPaymentLinksUrl({ username })
     const text = [
-      'Hash PayLink',
-      '',
-      'Create payment links, manage agent wallets, market tools, and StreamPay from the web dashboard.',
+      DASHBOARD_MESSAGE,
       ...(withButton ? [] : ['', url]),
     ].join('\n')
 
@@ -196,7 +200,7 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
       title: 'Create a Hash PayLink',
       description: 'Open the Telegram payment dashboard',
       input_message_content: {
-        message_text: 'Hash PayLink for Telegram\n\nOpen the dashboard to create payment links and share them back into this chat.',
+        message_text: DASHBOARD_MESSAGE,
         disable_web_page_preview: true,
       },
       reply_markup: {
