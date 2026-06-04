@@ -148,14 +148,14 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
     const results: TelegramInlineResultArticle[] = [{
       type: 'article',
       id: 'hashpaylink-payment-links',
-      title: 'Hash PayLink Payment Links',
+      title: 'Create a Hash PayLink',
       description: 'Request USDC, fund Polymarket, or fund an agent wallet',
       input_message_content: {
-        message_text: 'Hash PayLink payment request\n\nOpen the secure payment flow below.',
+        message_text: 'Hash PayLink for Telegram\n\nCreate a USDC payment link, then share it back into this chat.',
         disable_web_page_preview: true,
       },
       reply_markup: {
-        inline_keyboard: [[{ text: 'Open Hash Pay', url }]],
+        inline_keyboard: [[{ text: 'Open Payment Links', url }]],
       },
     }]
 
