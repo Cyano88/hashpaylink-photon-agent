@@ -121,10 +121,6 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
     return (value ?? '').replace(/^@+/, '').trim()
   }
 
-  function inlineUserLabel(query: TelegramInlineQuery) {
-    return cleanInlineValue(query.from?.username) || cleanInlineValue(query.from?.first_name)
-  }
-
   function buildInlinePaymentLinksUrl(query: TelegramInlineQuery) {
     const base = config.hashPayLinkBaseUrl.replace(/\/+$/, '')
     const params = new URLSearchParams({ open: '1' })
@@ -133,11 +129,10 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
 
     if (isGroup) {
       params.set('mode', 'group')
-      params.set('group', typedQuery || 'Telegram group')
+      if (typedQuery) params.set('target', typedQuery)
     } else {
       params.set('mode', 'person')
-      const payer = typedQuery || inlineUserLabel(query)
-      if (payer) params.set('payer', payer)
+      if (typedQuery) params.set('target', typedQuery)
     }
 
     return `${base}/telegram/payment-links?${params.toString()}`
