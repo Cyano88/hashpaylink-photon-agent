@@ -1,13 +1,28 @@
 import type { AppConfig } from './config.js'
-import { handleCommand, type CommandResult } from './commands.js'
 import type { ProfileStore } from './store.js'
+
+type TelegramButton = {
+  text: string
+  url: string
+}
+
+type TelegramOutbound = {
+  text: string
+  buttons?: TelegramButton[]
+  buttonRows?: TelegramButton[][]
+  forceReplyPlaceholder?: string
+}
 
 type TelegramUpdate = {
   update_id: number
   message?: {
     message_id: number
     chat: { id: number }
-    from?: { id: number }
+    from?: {
+      id: number
+      username?: string
+      first_name?: string
+    }
     text?: string
     reply_to_message?: {
       text?: string
@@ -75,7 +90,27 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
     return data.result
   }
 
-  async function sendMessage(chatId: number, result: CommandResult) {
+  function buildPaymentLinksUrl(options: { mode?: 'group' | 'person'; target?: string; username?: string } = {}) {
+    const base = config.hashPayLinkBaseUrl.replace(/\/+$/, '')
+    const params = new URLSearchParams({ open: '1' })
+    if (options.mode) params.set('mode', options.mode)
+    if (options.target) params.set('target', options.target)
+    if (options.username) params.set('u', options.username)
+    return `${base}/telegram/payment-links?${params.toString()}`
+  }
+
+  function buildDashboardLauncher(username?: string): TelegramOutbound {
+    return {
+      text: [
+        'Hash PayLink',
+        '',
+        'Create payment links, manage agent wallets, market tools, and StreamPay from the web dashboard.',
+      ].join('\n'),
+      buttons: [{ text: 'Open Hash PayLink', url: buildPaymentLinksUrl({ username }) }],
+    }
+  }
+
+  async function sendMessage(chatId: number, result: TelegramOutbound) {
     const body: Record<string, unknown> = {
       chat_id: chatId,
       text: result.text,
@@ -105,37 +140,20 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
     return callTelegram<TelegramMessage>('sendMessage', body)
   }
 
-  async function deleteMessage(chatId: number, messageId: number) {
-    try {
-      await callTelegram('deleteMessage', {
-        chat_id: chatId,
-        message_id: messageId,
-      })
-      return true
-    } catch {
-      return false
-    }
-  }
-
   function cleanInlineValue(value: string | undefined) {
     return (value ?? '').replace(/^@+/, '').trim()
   }
 
   function buildInlinePaymentLinksUrl(query: TelegramInlineQuery) {
-    const base = config.hashPayLinkBaseUrl.replace(/\/+$/, '')
-    const params = new URLSearchParams({ open: '1' })
     const isGroup = query.chat_type === 'group' || query.chat_type === 'supergroup' || query.chat_type === 'channel'
     const typedQuery = cleanInlineValue(query.query)
+    const username = query.from?.username ?? query.from?.first_name
 
     if (isGroup) {
-      params.set('mode', 'group')
-      if (typedQuery) params.set('target', typedQuery)
-    } else {
-      params.set('mode', 'person')
-      if (typedQuery) params.set('target', typedQuery)
+      return buildPaymentLinksUrl({ mode: 'group', target: typedQuery || undefined, username })
     }
 
-    return `${base}/telegram/payment-links?${params.toString()}`
+    return buildPaymentLinksUrl({ mode: 'person', target: typedQuery || undefined, username })
   }
 
   async function answerInlineQuery(query: TelegramInlineQuery) {
@@ -144,13 +162,13 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
       type: 'article',
       id: 'hashpaylink-payment-links',
       title: 'Create a Hash PayLink',
-      description: 'Request USDC, fund Polymarket, or fund an agent wallet',
+      description: 'Open the Telegram payment dashboard',
       input_message_content: {
-        message_text: 'Hash PayLink for Telegram\n\nCreate a USDC payment link, then share it back into this chat.',
+        message_text: 'Hash PayLink for Telegram\n\nOpen the dashboard to create payment links and share them back into this chat.',
         disable_web_page_preview: true,
       },
       reply_markup: {
-        inline_keyboard: [[{ text: 'Open Payment Links', url }]],
+        inline_keyboard: [[{ text: 'Open Hash PayLink', url }]],
       },
     }]
 
@@ -185,28 +203,8 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
         const text = message?.text
         if (!chatId || !userId || !text) continue
 
-        if (/^\/clear(?:@\w+)?$/i.test(text.trim())) {
-          const tracked = await store.clearBotMessages(String(userId), String(chatId))
-          const deleted = (await Promise.all(tracked.map(messageId => deleteMessage(chatId, messageId))))
-            .filter(Boolean).length
-          await deleteMessage(chatId, message.message_id)
-          const confirmation = await sendMessage(chatId, {
-            text: deleted > 0
-              ? `Cleared ${deleted} tracked Hash PayLink bot message${deleted === 1 ? '' : 's'} for you in this chat.`
-              : 'No tracked Hash PayLink bot messages found for you in this chat.',
-          })
-          setTimeout(() => {
-            void deleteMessage(chatId, confirmation.message_id)
-          }, 5_000)
-          continue
-        }
-
-        const result = await handleCommand(text, config, {
-          userId: String(userId),
-          store,
-          replyToText: message.reply_to_message?.text,
-        })
-        const sent = await sendMessage(chatId, result)
+        const username = message.from?.username ?? message.from?.first_name
+        const sent = await sendMessage(chatId, buildDashboardLauncher(username))
         await store.addBotMessage(String(userId), String(chatId), sent.message_id)
       }
     } catch (err) {
