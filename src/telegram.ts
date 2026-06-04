@@ -26,6 +26,10 @@ type TelegramUpdate = {
       username?: string
       first_name?: string
     }
+    via_bot?: {
+      id: number
+      username?: string
+    }
     text?: string
     reply_to_message?: {
       text?: string
@@ -238,9 +242,13 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
         const userId = message?.from?.id
         const text = message?.text
         if (!chatId || !userId || !text) continue
+        if (message.via_bot) continue
+
+        const command = text.trim().split(/\s+/, 1)[0]?.toLowerCase().replace(/@\w+$/, '') ?? ''
+        if (command !== '/start' && command !== '/hashpay') continue
 
         const username = message.from?.username ?? message.from?.first_name
-        console.log(`Telegram message received: chat=${message.chat.type ?? 'unknown'} command=${text.trim().split(/\s+/, 1)[0] ?? ''}`)
+        console.log(`Telegram message received: chat=${message.chat.type ?? 'unknown'} command=${command}`)
         const sent = await sendDashboardLauncher(chatId, username)
         console.log(`Telegram dashboard reply sent: chat=${message.chat.type ?? 'unknown'} message=${sent.message_id}`)
         await store.addBotMessage(String(userId), String(chatId), sent.message_id)
