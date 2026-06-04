@@ -83,14 +83,24 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
   const apiBase = `https://api.telegram.org/bot${config.telegramBotToken}`
 
   async function callTelegram<T>(method: string, body: Record<string, unknown>) {
-    const res = await fetch(`${apiBase}/${method}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-    const data = await res.json() as TelegramResponse<T>
-    if (!data.ok) throw new Error(data.description ?? `Telegram ${method} failed`)
-    return data.result
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 15_000)
+    try {
+      const res = await fetch(`${apiBase}/${method}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      })
+      const data = await res.json() as TelegramResponse<T>
+      if (!data.ok) throw new Error(data.description ?? `Telegram ${method} failed`)
+      return data.result
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      throw new Error(`Telegram ${method} failed: ${message}`)
+    } finally {
+      clearTimeout(timeout)
+    }
   }
 
   function dashboardBaseUrl() {
@@ -228,6 +238,7 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
         const username = message.from?.username ?? message.from?.first_name
         console.log(`Telegram message received: chat=${message.chat.type ?? 'unknown'} command=${text.trim().split(/\s+/, 1)[0] ?? ''}`)
         const sent = await sendDashboardLauncher(chatId, username)
+        console.log(`Telegram dashboard reply sent: chat=${message.chat.type ?? 'unknown'} message=${sent.message_id}`)
         await store.addBotMessage(String(userId), String(chatId), sent.message_id)
       }
     } catch (err) {
