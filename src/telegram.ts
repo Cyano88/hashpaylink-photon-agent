@@ -13,6 +13,18 @@ type TelegramUpdate = {
       text?: string
     }
   }
+  inline_query?: TelegramInlineQuery
+}
+
+type TelegramInlineQuery = {
+  id: string
+  from?: {
+    id: number
+    username?: string
+    first_name?: string
+  }
+  query?: string
+  chat_type?: 'sender' | 'private' | 'group' | 'supergroup' | 'channel'
 }
 
 type TelegramResponse<T> = {
@@ -23,6 +35,20 @@ type TelegramResponse<T> = {
 
 type TelegramMessage = {
   message_id: number
+}
+
+type TelegramInlineResultArticle = {
+  type: 'article'
+  id: string
+  title: string
+  description: string
+  input_message_content: {
+    message_text: string
+    disable_web_page_preview: boolean
+  }
+  reply_markup: {
+    inline_keyboard: Array<Array<{ text: string; url: string }>>
+  }
 }
 
 export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
@@ -91,6 +117,56 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
     }
   }
 
+  function cleanInlineValue(value: string | undefined) {
+    return (value ?? '').replace(/^@+/, '').trim()
+  }
+
+  function inlineUserLabel(query: TelegramInlineQuery) {
+    return cleanInlineValue(query.from?.username) || cleanInlineValue(query.from?.first_name)
+  }
+
+  function buildInlinePaymentLinksUrl(query: TelegramInlineQuery) {
+    const base = config.hashPayLinkBaseUrl.replace(/\/+$/, '')
+    const params = new URLSearchParams({ open: '1' })
+    const isGroup = query.chat_type === 'group' || query.chat_type === 'supergroup' || query.chat_type === 'channel'
+    const typedQuery = cleanInlineValue(query.query)
+
+    if (isGroup) {
+      params.set('mode', 'group')
+      params.set('group', typedQuery || 'Telegram group')
+    } else {
+      params.set('mode', 'person')
+      const payer = typedQuery || inlineUserLabel(query)
+      if (payer) params.set('payer', payer)
+    }
+
+    return `${base}/telegram/payment-links?${params.toString()}`
+  }
+
+  async function answerInlineQuery(query: TelegramInlineQuery) {
+    const url = buildInlinePaymentLinksUrl(query)
+    const results: TelegramInlineResultArticle[] = [{
+      type: 'article',
+      id: 'hashpaylink-payment-links',
+      title: 'Hash PayLink Payment Links',
+      description: 'Request USDC, fund Polymarket, or fund an agent wallet',
+      input_message_content: {
+        message_text: 'Hash PayLink payment request\n\nOpen the secure payment flow below.',
+        disable_web_page_preview: true,
+      },
+      reply_markup: {
+        inline_keyboard: [[{ text: 'Open Hash Pay', url }]],
+      },
+    }]
+
+    await callTelegram<boolean>('answerInlineQuery', {
+      inline_query_id: query.id,
+      results,
+      cache_time: 1,
+      is_personal: true,
+    })
+  }
+
   console.log('Hash PayLink Photon Agent listening for Telegram messages')
 
   while (true) {
@@ -98,11 +174,16 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
       const updates = await callTelegram<TelegramUpdate[]>('getUpdates', {
         offset,
         timeout: 30,
-        allowed_updates: ['message'],
+        allowed_updates: ['message', 'inline_query'],
       })
 
       for (const update of updates) {
         offset = update.update_id + 1
+        if (update.inline_query) {
+          await answerInlineQuery(update.inline_query)
+          continue
+        }
+
         const message = update.message
         const chatId = message?.chat.id
         const userId = message?.from?.id
