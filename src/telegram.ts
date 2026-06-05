@@ -189,17 +189,15 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
     const targetLine = request.mode === 'group'
       ? `Group: ${request.target}`
       : `Payer: ${request.target}`
-    const actionLine = request.mode === 'group'
-      ? `${request.label} is collecting ${amountLine}.`
-      : `${request.label} requested ${amountLine}.`
 
     return [
       request.mode === 'group' ? 'Hash PayLink collection' : 'Hash PayLink payment request',
       '',
-      actionLine,
+      request.label,
+      `Amount: ${amountLine}`,
       targetLine,
       '',
-      'Verify before paying.',
+      request.mode === 'group' ? 'Review before contributing.' : 'Review before paying.',
     ].join('\n')
   }
 
@@ -299,8 +297,8 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
         const results: TelegramInlineResultArticle[] = [{
           type: 'article',
           id: `hashpaylink-share-${request.id}`,
-          title: request.mode === 'group' ? `Share ${request.label}` : `Request ${amountLine}`,
-          description: request.mode === 'group' ? `Collection for ${request.target}` : `Payer: ${request.target}`,
+          title: request.mode === 'group' ? `Share collection` : `Share payment request`,
+          description: `${request.label} - ${amountLine}`,
           input_message_content: {
             message_text: buildSavedRequestText(request),
             disable_web_page_preview: true,
