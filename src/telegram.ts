@@ -79,6 +79,24 @@ const DASHBOARD_MESSAGE = [
   'Open the dashboard to create payment links and share them back into Telegram.',
 ].join('\n')
 
+type TelegramSavedRequest = {
+  id: string
+  mode: 'person' | 'group'
+  wallet: string
+  network: 'base' | 'solana'
+  label: string
+  amount: string
+  target: string
+  payUrl: string
+  createdAt: number
+}
+
+type TelegramRequestResponse = {
+  ok: boolean
+  request?: TelegramSavedRequest
+  error?: string
+}
+
 export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
   if (!config.telegramEnabled) {
     console.log('Telegram polling disabled.')
@@ -139,6 +157,58 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
       text,
       buttons: withButton ? [{ text: 'Open Hash PayLink', url }] : undefined,
     }
+  }
+
+  function buildTelegramRequestUrl(id: string) {
+    const base = dashboardBaseUrl()
+    const params = new URLSearchParams({ id })
+    return `${base}/api/telegram-request?${params.toString()}`
+  }
+
+  async function fetchTelegramRequest(id: string) {
+    const cleanId = id.replace(/[^a-zA-Z0-9_-]/g, '')
+    if (!cleanId) throw new Error('Missing Telegram request id')
+
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 12_000)
+    try {
+      const res = await fetch(buildTelegramRequestUrl(cleanId), { signal: controller.signal })
+      const data = await res.json() as TelegramRequestResponse
+      if (!res.ok || !data.ok || !data.request) {
+        throw new Error(data.error ?? `Request lookup failed with HTTP ${res.status}`)
+      }
+      return data.request
+    } finally {
+      clearTimeout(timeout)
+    }
+  }
+
+  function buildSavedRequestMessage(request: TelegramSavedRequest): TelegramOutbound {
+    const amountLine = request.amount ? `${request.amount} USDC` : 'USDC'
+    const payLabel = request.amount ? `Pay ${request.amount} USDC` : 'Open payment link'
+    const targetLine = request.mode === 'group'
+      ? `Group: ${request.target}`
+      : `Payer: ${request.target}`
+    const actionLine = request.mode === 'group'
+      ? `${request.label} is collecting ${amountLine}.`
+      : `${request.label} requested ${amountLine}.`
+
+    return {
+      text: [
+        request.mode === 'group' ? 'Hash PayLink collection' : 'Hash PayLink payment request',
+        '',
+        actionLine,
+        targetLine,
+        '',
+        'Verify before paying.',
+      ].join('\n'),
+      buttons: [{ text: payLabel, url: request.payUrl }],
+    }
+  }
+
+  async function sendSavedPaymentRequest(chatId: number, requestId: string) {
+    const request = await fetchTelegramRequest(requestId)
+    return sendMessage(chatId, buildSavedRequestMessage(request))
   }
 
   async function sendMessage(chatId: number, result: TelegramOutbound) {
@@ -244,11 +314,20 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
         if (!chatId || !userId || !text) continue
         if (message.via_bot) continue
 
-        const command = text.trim().split(/\s+/, 1)[0]?.toLowerCase().replace(/@\w+$/, '') ?? ''
+        const parts = text.trim().split(/\s+/)
+        const command = parts[0]?.toLowerCase().replace(/@\w+$/, '') ?? ''
         if (command !== '/start' && command !== '/hashpay') continue
 
         const username = message.from?.username ?? message.from?.first_name
         console.log(`Telegram message received: chat=${message.chat.type ?? 'unknown'} command=${command}`)
+        if (command === '/start' && parts[1]?.startsWith('share_')) {
+          const requestId = parts[1].replace(/^share_/, '')
+          const sent = await sendSavedPaymentRequest(chatId, requestId)
+          console.log(`Telegram payment request sent: chat=${message.chat.type ?? 'unknown'} message=${sent.message_id}`)
+          await store.addBotMessage(String(userId), String(chatId), sent.message_id)
+          continue
+        }
+
         const sent = await sendDashboardLauncher(chatId, username)
         console.log(`Telegram dashboard reply sent: chat=${message.chat.type ?? 'unknown'} message=${sent.message_id}`)
         await store.addBotMessage(String(userId), String(chatId), sent.message_id)
