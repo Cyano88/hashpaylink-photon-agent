@@ -3,7 +3,8 @@ import type { ProfileStore } from './store.js'
 
 type TelegramButton = {
   text: string
-  url: string
+  url?: string
+  switch_inline_query?: string
 }
 
 type TelegramOutbound = {
@@ -69,7 +70,7 @@ type TelegramInlineResultArticle = {
     disable_web_page_preview: boolean
   }
   reply_markup: {
-    inline_keyboard: Array<Array<{ text: string; url: string }>>
+    inline_keyboard: TelegramButton[][]
   }
 }
 
@@ -183,9 +184,8 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
     }
   }
 
-  function buildSavedRequestMessage(request: TelegramSavedRequest): TelegramOutbound {
+  function buildSavedRequestText(request: TelegramSavedRequest) {
     const amountLine = request.amount ? `${request.amount} USDC` : 'USDC'
-    const payLabel = request.amount ? `Pay ${request.amount} USDC` : 'Open payment link'
     const targetLine = request.mode === 'group'
       ? `Group: ${request.target}`
       : `Payer: ${request.target}`
@@ -193,22 +193,51 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
       ? `${request.label} is collecting ${amountLine}.`
       : `${request.label} requested ${amountLine}.`
 
+    return [
+      request.mode === 'group' ? 'Hash PayLink collection' : 'Hash PayLink payment request',
+      '',
+      actionLine,
+      targetLine,
+      '',
+      'Verify before paying.',
+    ].join('\n')
+  }
+
+  function buildPayButton(request: TelegramSavedRequest): TelegramButton {
     return {
-      text: [
-        request.mode === 'group' ? 'Hash PayLink collection' : 'Hash PayLink payment request',
-        '',
-        actionLine,
-        targetLine,
-        '',
-        'Verify before paying.',
-      ].join('\n'),
-      buttons: [{ text: payLabel, url: request.payUrl }],
+      text: request.amount ? `Pay ${request.amount} USDC` : 'Open payment link',
+      url: request.payUrl,
+    }
+  }
+
+  function buildSavedRequestMessage(request: TelegramSavedRequest, includeShareButton = false): TelegramOutbound {
+    const payButton = buildPayButton(request)
+    if (!includeShareButton) {
+      return {
+        text: buildSavedRequestText(request),
+        buttons: [payButton],
+      }
+    }
+
+    return {
+      text: buildSavedRequestText(request),
+      buttonRows: [
+        [payButton],
+        [{ text: 'Share this request', switch_inline_query: `share_${request.id}` }],
+      ],
     }
   }
 
   async function sendSavedPaymentRequest(chatId: number, requestId: string) {
     const request = await fetchTelegramRequest(requestId)
-    return sendMessage(chatId, buildSavedRequestMessage(request))
+    return sendMessage(chatId, buildSavedRequestMessage(request, true))
+  }
+
+  function telegramButtonPayload(button: TelegramButton) {
+    const payload: Record<string, string> = { text: button.text }
+    if (button.url) payload.url = button.url
+    if (button.switch_inline_query) payload.switch_inline_query = button.switch_inline_query
+    return payload
   }
 
   async function sendMessage(chatId: number, result: TelegramOutbound) {
@@ -219,10 +248,7 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
     }
     if (result.buttons?.length) {
       body.reply_markup = {
-        inline_keyboard: [result.buttons.map(button => ({
-          text: button.text,
-          url: button.url,
-        }))],
+        inline_keyboard: [result.buttons.map(telegramButtonPayload)],
       }
     } else if (result.forceReplyPlaceholder) {
       body.reply_markup = {
@@ -232,10 +258,7 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
       }
     } else if (result.buttonRows?.length) {
       body.reply_markup = {
-        inline_keyboard: result.buttonRows.map(row => row.map(button => ({
-          text: button.text,
-          url: button.url,
-        }))),
+        inline_keyboard: result.buttonRows.map(row => row.map(telegramButtonPayload)),
       }
     }
     return callTelegram<TelegramMessage>('sendMessage', body)
@@ -267,6 +290,38 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
   }
 
   async function answerInlineQuery(query: TelegramInlineQuery) {
+    const queryText = (query.query ?? '').trim()
+    if (queryText.startsWith('share_')) {
+      const requestId = queryText.replace(/^share_/, '')
+      try {
+        const request = await fetchTelegramRequest(requestId)
+        const amountLine = request.amount ? `${request.amount} USDC` : 'USDC'
+        const results: TelegramInlineResultArticle[] = [{
+          type: 'article',
+          id: `hashpaylink-share-${request.id}`,
+          title: request.mode === 'group' ? `Share ${request.label}` : `Request ${amountLine}`,
+          description: request.mode === 'group' ? `Collection for ${request.target}` : `Payer: ${request.target}`,
+          input_message_content: {
+            message_text: buildSavedRequestText(request),
+            disable_web_page_preview: true,
+          },
+          reply_markup: {
+            inline_keyboard: [[buildPayButton(request)]],
+          },
+        }]
+
+        await callTelegram<boolean>('answerInlineQuery', {
+          inline_query_id: query.id,
+          results,
+          cache_time: 1,
+          is_personal: true,
+        })
+        return
+      } catch (err) {
+        console.error(`Telegram request inline lookup failed: ${err instanceof Error ? err.message : err}`)
+      }
+    }
+
     const url = buildInlinePaymentLinksUrl(query)
     const results: TelegramInlineResultArticle[] = [{
       type: 'article',
