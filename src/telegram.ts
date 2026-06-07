@@ -143,17 +143,18 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
     return /^https?:\/\//i.test(configured) ? configured : `https://${configured}`
   }
 
-  function buildPaymentLinksUrl(options: { mode?: 'group' | 'person'; target?: string; username?: string } = {}) {
+  function buildPaymentLinksUrl(options: { mode?: 'group' | 'person'; target?: string; username?: string; telegramId?: string } = {}) {
     const base = dashboardBaseUrl()
     const params = new URLSearchParams({ open: '1' })
     if (options.mode) params.set('mode', options.mode)
     if (options.target) params.set('target', options.target)
     if (options.username) params.set('u', options.username)
+    if (options.telegramId) params.set('telegramId', options.telegramId)
     return `${base}/telegram/payment-links?${params.toString()}`
   }
 
-  function buildDashboardLauncher(username?: string, withButton = true): TelegramOutbound {
-    const url = buildPaymentLinksUrl({ username })
+  function buildDashboardLauncher(username?: string, telegramId?: string, withButton = true): TelegramOutbound {
+    const url = buildPaymentLinksUrl({ username, telegramId })
     const text = [
       DASHBOARD_MESSAGE,
       ...(withButton ? [] : ['', url]),
@@ -281,12 +282,12 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
     return callTelegram<TelegramMessage>('sendMessage', body)
   }
 
-  async function sendDashboardLauncher(chatId: number, username?: string) {
+  async function sendDashboardLauncher(chatId: number, username?: string, telegramId?: string) {
     try {
-      return await sendMessage(chatId, buildDashboardLauncher(username))
+      return await sendMessage(chatId, buildDashboardLauncher(username, telegramId))
     } catch (err) {
       console.error(`Telegram dashboard button failed: ${err instanceof Error ? err.message : err}`)
-      return sendMessage(chatId, buildDashboardLauncher(username, false))
+      return sendMessage(chatId, buildDashboardLauncher(username, telegramId, false))
     }
   }
 
@@ -298,12 +299,13 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
     const isGroup = query.chat_type === 'group' || query.chat_type === 'supergroup' || query.chat_type === 'channel'
     const typedQuery = cleanInlineValue(query.query)
     const username = query.from?.username ?? query.from?.first_name
+    const telegramId = query.from?.id ? String(query.from.id) : undefined
 
     if (isGroup) {
-      return buildPaymentLinksUrl({ mode: 'group', target: typedQuery || undefined, username })
+      return buildPaymentLinksUrl({ mode: 'group', target: typedQuery || undefined, username, telegramId })
     }
 
-    return buildPaymentLinksUrl({ mode: 'person', target: typedQuery || undefined, username })
+    return buildPaymentLinksUrl({ mode: 'person', target: typedQuery || undefined, username, telegramId })
   }
 
   async function answerInlineQuery(query: TelegramInlineQuery) {
@@ -404,7 +406,7 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
           continue
         }
 
-        const sent = await sendDashboardLauncher(chatId, username)
+        const sent = await sendDashboardLauncher(chatId, username, String(userId))
         console.log(`Telegram dashboard reply sent: chat=${message.chat.type ?? 'unknown'} message=${sent.message_id}`)
         await store.addBotMessage(String(userId), String(chatId), sent.message_id)
       }
