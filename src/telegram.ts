@@ -83,6 +83,7 @@ const DASHBOARD_MESSAGE = [
 type TelegramSavedRequest = {
   id: string
   mode: 'person' | 'group'
+  kind?: 'payment-request' | 'polymarket-funding'
   wallet: string
   network: 'base' | 'solana'
   label: string
@@ -96,6 +97,10 @@ type TelegramRequestResponse = {
   ok: boolean
   request?: TelegramSavedRequest
   error?: string
+}
+
+function shortAddress(value: string) {
+  return value.length > 14 ? `${value.slice(0, 6)}...${value.slice(-4)}` : value
 }
 
 export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
@@ -186,6 +191,18 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
 
   function buildSavedRequestText(request: TelegramSavedRequest) {
     const amountLine = request.amount ? `${request.amount} USDC` : 'USDC'
+    if (request.kind === 'polymarket-funding') {
+      return [
+        'Polymarket funding request',
+        '',
+        'Add USDC to a Polymarket funding wallet.',
+        `Amount: ${amountLine}`,
+        `Wallet: ${shortAddress(request.wallet)}`,
+        '',
+        'Review before funding.',
+      ].join('\n')
+    }
+
     const targetLine = request.mode === 'group'
       ? `Group: ${request.target}`
       : `Payer: ${request.target}`
@@ -203,7 +220,9 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
 
   function buildPayButton(request: TelegramSavedRequest): TelegramButton {
     return {
-      text: request.amount ? `Pay ${request.amount} USDC` : 'Open payment link',
+      text: request.kind === 'polymarket-funding'
+        ? (request.amount ? `Fund ${request.amount} USDC` : 'Fund Polymarket')
+        : (request.amount ? `Pay ${request.amount} USDC` : 'Open payment link'),
       url: request.payUrl,
     }
   }
@@ -297,8 +316,12 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
         const results: TelegramInlineResultArticle[] = [{
           type: 'article',
           id: `hashpaylink-share-${request.id}`,
-          title: request.mode === 'group' ? `Share collection` : `Share payment request`,
-          description: `${request.label} - ${amountLine}`,
+          title: request.kind === 'polymarket-funding'
+            ? 'Share Polymarket funding'
+            : request.mode === 'group' ? `Share collection` : `Share payment request`,
+          description: request.kind === 'polymarket-funding'
+            ? `${amountLine} to ${shortAddress(request.wallet)}`
+            : `${request.label} - ${amountLine}`,
           input_message_content: {
             message_text: buildSavedRequestText(request),
             disable_web_page_preview: true,

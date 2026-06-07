@@ -22,7 +22,7 @@ export type AppConfig = {
   telegramReturnUrl: string
   adminUserIds: string[]
   emailEnabled: boolean
-  sendgridApiKey: string
+  resendApiKey: string
   alertFromEmail: string
   alertFromName: string
   alertReplyToEmail: string
@@ -108,7 +108,7 @@ export function loadConfig(): AppConfig {
       .map(item => item.trim())
       .filter(Boolean),
     emailEnabled: process.env.EMAIL_ENABLED === undefined ? false : enabled(process.env.EMAIL_ENABLED),
-    sendgridApiKey: optional('SENDGRID_API_KEY'),
+    resendApiKey: optional('RESEND_API_KEY'),
     alertFromEmail: optional('ALERT_FROM_EMAIL'),
     alertFromName: optional('ALERT_FROM_NAME') || 'Hash PayLink Alerts',
     alertReplyToEmail: optional('ALERT_REPLY_TO_EMAIL'),

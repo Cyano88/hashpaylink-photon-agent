@@ -221,10 +221,10 @@ WHATSAPP_VERIFY_TOKEN=
 WHATSAPP_GRAPH_VERSION=v20.0
 PORT=3000
 
-# Optional Polymarket risk alert emails via SendGrid.
+# Optional Polymarket risk alert emails via Resend.
 EMAIL_ENABLED=false
-SENDGRID_API_KEY=
-ALERT_FROM_EMAIL=alerts@yourdomain.com
+RESEND_API_KEY=
+ALERT_FROM_EMAIL=no-reply@mail.hashpaylink.com
 ALERT_FROM_NAME=Hash PayLink Alerts
 ALERT_REPLY_TO_EMAIL=
 POLYMARKET_ALERT_INTERVAL_MINUTES=60
