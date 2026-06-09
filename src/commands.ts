@@ -917,6 +917,17 @@ function buildAgentWalletSetupUrl(slug: string, config: AppConfig) {
   return `${base}/agent?${params.toString()}`
 }
 
+function buildTelegramAgentLauncherUrl(config: AppConfig, userId: string) {
+  const base = config.hashPayLinkBaseUrl.replace(/\/+$/, '')
+  const params = new URLSearchParams({
+    open: '1',
+    section: 'agent-wallets',
+    service: 'hashpaylink-agent',
+    telegramId: userId,
+  })
+  return `${base}/telegram/payment-links?${params.toString()}`
+}
+
 function agentDashboard(agent: AgentRegistration, config: AppConfig): CommandResult {
   const funding = buildAgentFundingRequest(agent, '10', 'base', config)
   const stream = buildAgentStreamRequest(agent, config)
@@ -2196,7 +2207,7 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     return { text: withFooter(LP_HELP_LINES) }
   }
 
-  if ((cmd === '/agent' && trimmed.split(/\s+/).length === 1) || cmd === '/agenthelp') {
+  if (cmd === '/agenthelp') {
     return { text: withFooter(AGENT_HELP_LINES) }
   }
 
@@ -2764,8 +2775,21 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
   }
 
   if (cmd === '/agent') {
-    const slug = normalizeAgentSlug(trimmed.split(/\s+/)[1] ?? config.defaultAgentSlug)
+    const rawSlug = trimmed.split(/\s+/)[1]
+    const slug = !rawSlug || ['agent', 'helper', 'hashpaylink', 'hash-paylink'].includes(rawSlug.toLowerCase())
+      ? config.defaultAgentSlug
+      : normalizeAgentSlug(rawSlug)
     if (!slug) return { text: `Use /agent ${config.defaultAgentSlug}.` }
+    if (slug === config.defaultAgentSlug) {
+      return {
+        text: withFooter([
+          'Hash PayLink Agent',
+          '',
+          'Open the helper inside your Telegram dashboard.',
+        ]),
+        buttons: [{ text: 'Open Hash PayLink Agent', url: buildTelegramAgentLauncherUrl(config, context.userId) }],
+      }
+    }
     const agent = getAgent(context.store, config, slug)
     if (!agent) return { text: `Agent "${slug}" is not registered on Hash PayLink.` }
     const hydrated = await hydrateAgentWallet(agent, config)
