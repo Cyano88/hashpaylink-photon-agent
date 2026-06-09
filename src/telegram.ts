@@ -1,5 +1,6 @@
 import type { AppConfig } from './config.js'
 import type { ProfileStore } from './store.js'
+import { handleCommand } from './commands.js'
 
 type TelegramButton = {
   text: string
@@ -394,8 +395,6 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
 
         const parts = text.trim().split(/\s+/)
         const command = parts[0]?.toLowerCase().replace(/@\w+$/, '') ?? ''
-        if (command !== '/start' && command !== '/hashpay') continue
-
         const username = message.from?.username ?? message.from?.first_name
         console.log(`Telegram message received: chat=${message.chat.type ?? 'unknown'} command=${command}`)
         if (command === '/start' && parts[1]?.startsWith('share_')) {
@@ -406,8 +405,22 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
           continue
         }
 
-        const sent = await sendDashboardLauncher(chatId, username, String(userId))
-        console.log(`Telegram dashboard reply sent: chat=${message.chat.type ?? 'unknown'} message=${sent.message_id}`)
+        if (command === '/start' || command === '/hashpay') {
+          const sent = await sendDashboardLauncher(chatId, username, String(userId))
+          console.log(`Telegram dashboard reply sent: chat=${message.chat.type ?? 'unknown'} message=${sent.message_id}`)
+          await store.addBotMessage(String(userId), String(chatId), sent.message_id)
+          continue
+        }
+
+        if (!command.startsWith('/')) continue
+
+        const result = await handleCommand(text, config, {
+          userId: String(userId),
+          store,
+          replyToText: message.reply_to_message?.text,
+        })
+        const sent = await sendMessage(chatId, result)
+        console.log(`Telegram command reply sent: chat=${message.chat.type ?? 'unknown'} command=${command} message=${sent.message_id}`)
         await store.addBotMessage(String(userId), String(chatId), sent.message_id)
       }
     } catch (err) {
