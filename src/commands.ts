@@ -60,7 +60,7 @@ const HELP_LINES = [
   '',
   '/pay - create payment links',
   '/stream - StreamPay on Arc',
-  '/agent - buyer and seller agents',
+  '/agent - Hash PayLink helper',
   '/polymarket - LP Scout and daily reports',
   '/settings - saved wallets and defaults',
 ]
@@ -115,12 +115,10 @@ const LP_HELP_LINES = [
 const AGENT_HELP_LINES = [
   'Agents',
   '',
-  '/buyeragent - buy services',
-  '/selleragent - sell services',
-  '/agent hashpaylink-agent - open dashboard',
-  '/agents - seller directory',
+  '/agent - open Hash PayLink helper',
+  '/agents - public agent directory',
   '',
-  'Seller receives USDC. Buyer spends USDC.',
+  'Set up and manage wallets from the web dashboard.',
 ]
 
 const SELLER_AGENT_HELP_LINES = [
