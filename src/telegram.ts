@@ -416,6 +416,7 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
 
         const result = await handleCommand(text, config, {
           userId: String(userId),
+          username,
           store,
           replyToText: message.reply_to_message?.text,
         })

@@ -22,6 +22,7 @@ export type CommandResult = {
 
 export type CommandContext = {
   userId: string
+  username?: string
   store: ProfileStore
   replyToText?: string
 }
@@ -917,7 +918,7 @@ function buildAgentWalletSetupUrl(slug: string, config: AppConfig) {
   return `${base}/agent?${params.toString()}`
 }
 
-function buildTelegramAgentLauncherUrl(config: AppConfig, userId: string) {
+function buildTelegramAgentLauncherUrl(config: AppConfig, userId: string, username?: string) {
   const base = config.hashPayLinkBaseUrl.replace(/\/+$/, '')
   const params = new URLSearchParams({
     open: '1',
@@ -925,6 +926,8 @@ function buildTelegramAgentLauncherUrl(config: AppConfig, userId: string) {
     service: 'hashpaylink-agent',
     telegramId: userId,
   })
+  const cleanUsername = (username ?? '').replace(/^@+/, '').trim()
+  if (cleanUsername) params.set('u', cleanUsername)
   return `${base}/telegram/payment-links?${params.toString()}`
 }
 
@@ -2787,7 +2790,7 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
           '',
           'Open the helper inside your Telegram dashboard.',
         ]),
-        buttons: [{ text: 'Open Hash PayLink Agent', url: buildTelegramAgentLauncherUrl(config, context.userId) }],
+        buttons: [{ text: 'Open Hash PayLink Agent', url: buildTelegramAgentLauncherUrl(config, context.userId, context.username) }],
       }
     }
     const agent = getAgent(context.store, config, slug)
