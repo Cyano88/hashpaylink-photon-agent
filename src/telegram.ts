@@ -81,6 +81,12 @@ const DASHBOARD_MESSAGE = [
   'Open the dashboard to create payment links and share them back into Telegram.',
 ].join('\n')
 
+const POLYDESK_MESSAGE = [
+  'PolyDesk',
+  '',
+  'Fund Polymarket, track positions, get alerts, and ask LP Scout from Telegram.',
+].join('\n')
+
 type TelegramSavedRequest = {
   id: string
   mode: 'person' | 'group'
@@ -154,6 +160,19 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
     return `${base}/telegram/payment-links?${params.toString()}`
   }
 
+  function buildPolyDeskUrl(username?: string, telegramId?: string) {
+    const base = dashboardBaseUrl()
+    const params = new URLSearchParams({ open: '1', section: 'market-tools' })
+    if (username) params.set('u', username)
+    if (telegramId) params.set('telegramId', telegramId)
+    return `${base}/telegram/payment-links?${params.toString()}`
+  }
+
+  function isPolyDeskPayload(payload?: string) {
+    const normalized = (payload ?? '').trim().toLowerCase()
+    return ['polymarket', 'polydesk', 'poly-desk', 'poly'].includes(normalized)
+  }
+
   function buildDashboardLauncher(username?: string, telegramId?: string, withButton = true): TelegramOutbound {
     const url = buildPaymentLinksUrl({ username, telegramId })
     const text = [
@@ -164,6 +183,19 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
     return {
       text,
       buttons: withButton ? [{ text: 'Open Hash PayLink', url }] : undefined,
+    }
+  }
+
+  function buildPolyDeskLauncher(username?: string, telegramId?: string, withButton = true): TelegramOutbound {
+    const url = buildPolyDeskUrl(username, telegramId)
+    const text = [
+      POLYDESK_MESSAGE,
+      ...(withButton ? [] : ['', url]),
+    ].join('\n')
+
+    return {
+      text,
+      buttons: withButton ? [{ text: 'Open PolyDesk', url }] : undefined,
     }
   }
 
@@ -401,6 +433,13 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
           const requestId = parts[1].replace(/^share_/, '')
           const sent = await sendSavedPaymentRequest(chatId, requestId)
           console.log(`Telegram payment request sent: chat=${message.chat.type ?? 'unknown'} message=${sent.message_id}`)
+          await store.addBotMessage(String(userId), String(chatId), sent.message_id)
+          continue
+        }
+
+        if (command === '/start' && isPolyDeskPayload(parts[1])) {
+          const sent = await sendMessage(chatId, buildPolyDeskLauncher(username, String(userId)))
+          console.log(`Telegram PolyDesk reply sent: chat=${message.chat.type ?? 'unknown'} message=${sent.message_id}`)
           await store.addBotMessage(String(userId), String(chatId), sent.message_id)
           continue
         }
