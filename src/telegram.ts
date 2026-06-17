@@ -1,18 +1,54 @@
 import type { AppConfig } from './config.js'
-import { handleCommand, type CommandResult } from './commands.js'
 import type { ProfileStore } from './store.js'
+import { handleCommand } from './commands.js'
+
+type TelegramButton = {
+  text: string
+  url?: string
+  switch_inline_query?: string
+}
+
+type TelegramOutbound = {
+  text: string
+  buttons?: TelegramButton[]
+  buttonRows?: TelegramButton[][]
+  forceReplyPlaceholder?: string
+}
 
 type TelegramUpdate = {
   update_id: number
   message?: {
     message_id: number
-    chat: { id: number }
-    from?: { id: number }
+    chat: {
+      id: number
+      type?: 'private' | 'group' | 'supergroup' | 'channel'
+    }
+    from?: {
+      id: number
+      username?: string
+      first_name?: string
+    }
+    via_bot?: {
+      id: number
+      username?: string
+    }
     text?: string
     reply_to_message?: {
       text?: string
     }
   }
+  inline_query?: TelegramInlineQuery
+}
+
+type TelegramInlineQuery = {
+  id: string
+  from?: {
+    id: number
+    username?: string
+    first_name?: string
+  }
+  query?: string
+  chat_type?: 'sender' | 'private' | 'group' | 'supergroup' | 'channel'
 }
 
 type TelegramResponse<T> = {
@@ -23,6 +59,49 @@ type TelegramResponse<T> = {
 
 type TelegramMessage = {
   message_id: number
+}
+
+type TelegramInlineResultArticle = {
+  type: 'article'
+  id: string
+  title: string
+  description: string
+  input_message_content: {
+    message_text: string
+    disable_web_page_preview: boolean
+  }
+  reply_markup: {
+    inline_keyboard: TelegramButton[][]
+  }
+}
+
+const DASHBOARD_MESSAGE = [
+  'Hash PayLink',
+  '',
+  'Open the dashboard to create payment links and share them back into Telegram.',
+].join('\n')
+
+type TelegramSavedRequest = {
+  id: string
+  mode: 'person' | 'group'
+  kind?: 'payment-request' | 'polymarket-funding'
+  wallet: string
+  network: 'base' | 'solana'
+  label: string
+  amount: string
+  target: string
+  payUrl: string
+  createdAt: number
+}
+
+type TelegramRequestResponse = {
+  ok: boolean
+  request?: TelegramSavedRequest
+  error?: string
+}
+
+function shortAddress(value: string) {
+  return value.length > 14 ? `${value.slice(0, 6)}...${value.slice(-4)}` : value
 }
 
 export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
@@ -39,17 +118,148 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
   const apiBase = `https://api.telegram.org/bot${config.telegramBotToken}`
 
   async function callTelegram<T>(method: string, body: Record<string, unknown>) {
-    const res = await fetch(`${apiBase}/${method}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-    const data = await res.json() as TelegramResponse<T>
-    if (!data.ok) throw new Error(data.description ?? `Telegram ${method} failed`)
-    return data.result
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 15_000)
+    try {
+      const res = await fetch(`${apiBase}/${method}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      })
+      const data = await res.json() as TelegramResponse<T>
+      if (!data.ok) throw new Error(data.description ?? `Telegram ${method} failed`)
+      return data.result
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      throw new Error(`Telegram ${method} failed: ${message}`)
+    } finally {
+      clearTimeout(timeout)
+    }
   }
 
-  async function sendMessage(chatId: number, result: CommandResult) {
+  function dashboardBaseUrl() {
+    const configured = config.hashPayLinkBaseUrl.trim().replace(/\/+$/, '')
+    if (!configured) return 'https://hashpaylink.com'
+    return /^https?:\/\//i.test(configured) ? configured : `https://${configured}`
+  }
+
+  function buildPaymentLinksUrl(options: { mode?: 'group' | 'person'; target?: string; username?: string; telegramId?: string } = {}) {
+    const base = dashboardBaseUrl()
+    const params = new URLSearchParams({ open: '1' })
+    if (options.mode) params.set('mode', options.mode)
+    if (options.target) params.set('target', options.target)
+    if (options.username) params.set('u', options.username)
+    if (options.telegramId) params.set('telegramId', options.telegramId)
+    return `${base}/telegram/payment-links?${params.toString()}`
+  }
+
+  function buildDashboardLauncher(username?: string, telegramId?: string, withButton = true): TelegramOutbound {
+    const url = buildPaymentLinksUrl({ username, telegramId })
+    const text = [
+      DASHBOARD_MESSAGE,
+      ...(withButton ? [] : ['', url]),
+    ].join('\n')
+
+    return {
+      text,
+      buttons: withButton ? [{ text: 'Open Hash PayLink', url }] : undefined,
+    }
+  }
+
+  function buildTelegramRequestUrl(id: string) {
+    const base = dashboardBaseUrl()
+    const params = new URLSearchParams({ id })
+    return `${base}/api/telegram-request?${params.toString()}`
+  }
+
+  async function fetchTelegramRequest(id: string) {
+    const cleanId = id.replace(/[^a-zA-Z0-9_-]/g, '')
+    if (!cleanId) throw new Error('Missing Telegram request id')
+
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 12_000)
+    try {
+      const res = await fetch(buildTelegramRequestUrl(cleanId), { signal: controller.signal })
+      const data = await res.json() as TelegramRequestResponse
+      if (!res.ok || !data.ok || !data.request) {
+        throw new Error(data.error ?? `Request lookup failed with HTTP ${res.status}`)
+      }
+      return data.request
+    } finally {
+      clearTimeout(timeout)
+    }
+  }
+
+  function buildSavedRequestText(request: TelegramSavedRequest) {
+    const amountLine = request.amount ? `${request.amount} USDC` : 'USDC'
+    if (request.kind === 'polymarket-funding') {
+      return [
+        'Polymarket funding request',
+        '',
+        'Add USDC to a Polymarket funding wallet.',
+        `Amount: ${amountLine}`,
+        `Wallet: ${shortAddress(request.wallet)}`,
+        '',
+        'Review before funding.',
+      ].join('\n')
+    }
+
+    const targetLine = request.mode === 'group'
+      ? `Group: ${request.target}`
+      : `Payer: ${request.target}`
+
+    return [
+      request.mode === 'group' ? 'Hash PayLink collection' : 'Hash PayLink payment request',
+      '',
+      request.label,
+      `Amount: ${amountLine}`,
+      targetLine,
+      '',
+      request.mode === 'group' ? 'Review before contributing.' : 'Review before paying.',
+    ].join('\n')
+  }
+
+  function buildPayButton(request: TelegramSavedRequest): TelegramButton {
+    return {
+      text: request.kind === 'polymarket-funding'
+        ? (request.amount ? `Fund ${request.amount} USDC` : 'Fund Polymarket')
+        : (request.amount ? `Pay ${request.amount} USDC` : 'Open payment link'),
+      url: request.payUrl,
+    }
+  }
+
+  function buildSavedRequestMessage(request: TelegramSavedRequest, includeShareButton = false): TelegramOutbound {
+    const payButton = buildPayButton(request)
+    if (!includeShareButton) {
+      return {
+        text: buildSavedRequestText(request),
+        buttons: [payButton],
+      }
+    }
+
+    return {
+      text: buildSavedRequestText(request),
+      buttonRows: [
+        [payButton],
+        [{ text: 'Share this request', switch_inline_query: `share_${request.id}` }],
+      ],
+    }
+  }
+
+  async function sendSavedPaymentRequest(chatId: number, requestId: string) {
+    const request = await fetchTelegramRequest(requestId)
+    return sendMessage(chatId, buildSavedRequestMessage(request, true))
+  }
+
+  function telegramButtonPayload(button: TelegramButton) {
+    const payload: Record<string, string> = { text: button.text }
+    if (button.url) payload.url = button.url
+    if (button.switch_inline_query) payload.switch_inline_query = button.switch_inline_query
+    return payload
+  }
+
+  async function sendMessage(chatId: number, result: TelegramOutbound) {
     const body: Record<string, unknown> = {
       chat_id: chatId,
       text: result.text,
@@ -57,10 +267,7 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
     }
     if (result.buttons?.length) {
       body.reply_markup = {
-        inline_keyboard: [result.buttons.map(button => ({
-          text: button.text,
-          url: button.url,
-        }))],
+        inline_keyboard: [result.buttons.map(telegramButtonPayload)],
       }
     } else if (result.forceReplyPlaceholder) {
       body.reply_markup = {
@@ -70,25 +277,96 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
       }
     } else if (result.buttonRows?.length) {
       body.reply_markup = {
-        inline_keyboard: result.buttonRows.map(row => row.map(button => ({
-          text: button.text,
-          url: button.url,
-        }))),
+        inline_keyboard: result.buttonRows.map(row => row.map(telegramButtonPayload)),
       }
     }
     return callTelegram<TelegramMessage>('sendMessage', body)
   }
 
-  async function deleteMessage(chatId: number, messageId: number) {
+  async function sendDashboardLauncher(chatId: number, username?: string, telegramId?: string) {
     try {
-      await callTelegram('deleteMessage', {
-        chat_id: chatId,
-        message_id: messageId,
-      })
-      return true
-    } catch {
-      return false
+      return await sendMessage(chatId, buildDashboardLauncher(username, telegramId))
+    } catch (err) {
+      console.error(`Telegram dashboard button failed: ${err instanceof Error ? err.message : err}`)
+      return sendMessage(chatId, buildDashboardLauncher(username, telegramId, false))
     }
+  }
+
+  function cleanInlineValue(value: string | undefined) {
+    return (value ?? '').replace(/^@+/, '').trim()
+  }
+
+  function buildInlinePaymentLinksUrl(query: TelegramInlineQuery) {
+    const isGroup = query.chat_type === 'group' || query.chat_type === 'supergroup' || query.chat_type === 'channel'
+    const typedQuery = cleanInlineValue(query.query)
+    const username = query.from?.username ?? query.from?.first_name
+    const telegramId = query.from?.id ? String(query.from.id) : undefined
+
+    if (isGroup) {
+      return buildPaymentLinksUrl({ mode: 'group', target: typedQuery || undefined, username, telegramId })
+    }
+
+    return buildPaymentLinksUrl({ mode: 'person', target: typedQuery || undefined, username, telegramId })
+  }
+
+  async function answerInlineQuery(query: TelegramInlineQuery) {
+    const queryText = (query.query ?? '').trim()
+    if (queryText.startsWith('share_')) {
+      const requestId = queryText.replace(/^share_/, '')
+      try {
+        const request = await fetchTelegramRequest(requestId)
+        const amountLine = request.amount ? `${request.amount} USDC` : 'USDC'
+        const results: TelegramInlineResultArticle[] = [{
+          type: 'article',
+          id: `hashpaylink-share-${request.id}`,
+          title: request.kind === 'polymarket-funding'
+            ? 'Share Polymarket funding'
+            : request.mode === 'group' ? `Share collection` : `Share payment request`,
+          description: request.kind === 'polymarket-funding'
+            ? `${amountLine} to ${shortAddress(request.wallet)}`
+            : `${request.label} - ${amountLine}`,
+          input_message_content: {
+            message_text: buildSavedRequestText(request),
+            disable_web_page_preview: true,
+          },
+          reply_markup: {
+            inline_keyboard: [[buildPayButton(request)]],
+          },
+        }]
+
+        await callTelegram<boolean>('answerInlineQuery', {
+          inline_query_id: query.id,
+          results,
+          cache_time: 1,
+          is_personal: true,
+        })
+        return
+      } catch (err) {
+        console.error(`Telegram request inline lookup failed: ${err instanceof Error ? err.message : err}`)
+      }
+    }
+
+    const url = buildInlinePaymentLinksUrl(query)
+    const results: TelegramInlineResultArticle[] = [{
+      type: 'article',
+      id: 'hashpaylink-payment-links',
+      title: 'Create a Hash PayLink',
+      description: 'Open the Telegram payment dashboard',
+      input_message_content: {
+        message_text: DASHBOARD_MESSAGE,
+        disable_web_page_preview: true,
+      },
+      reply_markup: {
+        inline_keyboard: [[{ text: 'Open Hash PayLink', url }]],
+      },
+    }]
+
+    await callTelegram<boolean>('answerInlineQuery', {
+      inline_query_id: query.id,
+      results,
+      cache_time: 1,
+      is_personal: true,
+    })
   }
 
   console.log('Hash PayLink Photon Agent listening for Telegram messages')
@@ -98,39 +376,52 @@ export async function runTelegramBot(config: AppConfig, store: ProfileStore) {
       const updates = await callTelegram<TelegramUpdate[]>('getUpdates', {
         offset,
         timeout: 30,
-        allowed_updates: ['message'],
+        allowed_updates: ['message', 'inline_query'],
       })
 
       for (const update of updates) {
         offset = update.update_id + 1
+        if (update.inline_query) {
+          await answerInlineQuery(update.inline_query)
+          continue
+        }
+
         const message = update.message
         const chatId = message?.chat.id
         const userId = message?.from?.id
         const text = message?.text
         if (!chatId || !userId || !text) continue
+        if (message.via_bot) continue
 
-        if (/^\/clear(?:@\w+)?$/i.test(text.trim())) {
-          const tracked = await store.clearBotMessages(String(userId), String(chatId))
-          const deleted = (await Promise.all(tracked.map(messageId => deleteMessage(chatId, messageId))))
-            .filter(Boolean).length
-          await deleteMessage(chatId, message.message_id)
-          const confirmation = await sendMessage(chatId, {
-            text: deleted > 0
-              ? `Cleared ${deleted} tracked Hash PayLink bot message${deleted === 1 ? '' : 's'} for you in this chat.`
-              : 'No tracked Hash PayLink bot messages found for you in this chat.',
-          })
-          setTimeout(() => {
-            void deleteMessage(chatId, confirmation.message_id)
-          }, 5_000)
+        const parts = text.trim().split(/\s+/)
+        const command = parts[0]?.toLowerCase().replace(/@\w+$/, '') ?? ''
+        const username = message.from?.username ?? message.from?.first_name
+        console.log(`Telegram message received: chat=${message.chat.type ?? 'unknown'} command=${command}`)
+        if (command === '/start' && parts[1]?.startsWith('share_')) {
+          const requestId = parts[1].replace(/^share_/, '')
+          const sent = await sendSavedPaymentRequest(chatId, requestId)
+          console.log(`Telegram payment request sent: chat=${message.chat.type ?? 'unknown'} message=${sent.message_id}`)
+          await store.addBotMessage(String(userId), String(chatId), sent.message_id)
           continue
         }
 
+        if (command === '/start' || command === '/hashpay') {
+          const sent = await sendDashboardLauncher(chatId, username, String(userId))
+          console.log(`Telegram dashboard reply sent: chat=${message.chat.type ?? 'unknown'} message=${sent.message_id}`)
+          await store.addBotMessage(String(userId), String(chatId), sent.message_id)
+          continue
+        }
+
+        if (!command.startsWith('/')) continue
+
         const result = await handleCommand(text, config, {
           userId: String(userId),
+          username,
           store,
           replyToText: message.reply_to_message?.text,
         })
         const sent = await sendMessage(chatId, result)
+        console.log(`Telegram command reply sent: chat=${message.chat.type ?? 'unknown'} command=${command} message=${sent.message_id}`)
         await store.addBotMessage(String(userId), String(chatId), sent.message_id)
       }
     } catch (err) {

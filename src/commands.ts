@@ -22,6 +22,7 @@ export type CommandResult = {
 
 export type CommandContext = {
   userId: string
+  username?: string
   store: ProfileStore
   replyToText?: string
 }
@@ -55,12 +56,12 @@ const POLYMARKET_AUTOPILOT_STOP_LOSS_PERCENT = 30
 const HELP_LINES = [
   'Hash PayLink',
   '',
-  'USDC payments and agent commerce from Telegram.',
+  'USDC payments, Polymarket tools, and StreamPay from Telegram.',
   '',
   '/pay - create payment links',
+  '/polymarket - PolyDesk funding, portfolio alerts, LP Scout',
   '/stream - StreamPay on Arc',
-  '/agent - buyer and seller agents',
-  '/polymarket - PolyDesk portfolio, funding, alerts, LP Scout',
+  '/agent - helper and service dashboard',
   '/settings - saved wallets and defaults',
 ]
 
@@ -81,6 +82,7 @@ const STREAMPAY_HELP_LINES = [
   '',
   '/stream 10 USDC to 0xWallet for 7d - new stream',
   '/stream 10 USDC to email@example.com for 7d - stream to email',
+  '/streamagent hashpaylink-agent - ongoing agent retainer',
   '/streams - running and recent streams',
   '/streamready pending-id - check email wallet',
   '',
@@ -92,7 +94,9 @@ const POLYMARKET_HELP_LINES = [
   '',
   'Fund Polymarket, track positions, get alerts, and ask LP Scout from Telegram.',
   '',
-  '/lp x402 buyer-agent - one-time LP Scout',
+  '/fund polymarket on base - create funding link',
+  '/lp best - paid LP Scout report',
+  '/lpmarket polymarket-url-or-slug - inspect one market',
   '/agenticstream 7d you@example.com - daily LP reports',
   '/poly - view saved public positions',
   '',
@@ -114,14 +118,14 @@ const LP_HELP_LINES = [
 ]
 
 const AGENT_HELP_LINES = [
-  'Agents',
+  'Hash PayLink Agent',
   '',
-  '/buyeragent - buy services',
-  '/selleragent - sell services',
-  '/agent hashpaylink-agent - open dashboard',
-  '/agents - seller directory',
+  '/agent - open helper and dashboard',
+  '/polymarket - PolyDesk tools',
+  '/streampay - StreamPay tools',
+  '/agents - public agent directory, coming soon for broad discovery',
   '',
-  'Seller receives USDC. Buyer spends USDC.',
+  'Marketplace remains available as Soon while payment, Polymarket, and StreamPay flows mature.',
 ]
 
 const SELLER_AGENT_HELP_LINES = [
@@ -922,6 +926,23 @@ function buildAgentWalletSetupUrl(slug: string, config: AppConfig) {
   params.set('fund', '10')
   params.set('n', 'arc')
   return `${base}/agent?${params.toString()}`
+}
+
+function buildTelegramDashboardUrl(config: AppConfig, userId: string, username: string | undefined, section = 'agent-wallets', service?: string) {
+  const base = config.hashPayLinkBaseUrl.replace(/\/+$/, '')
+  const params = new URLSearchParams({
+    open: '1',
+    section,
+    telegramId: userId,
+  })
+  if (service) params.set('service', service)
+  const cleanUsername = (username ?? '').replace(/^@+/, '').trim()
+  if (cleanUsername) params.set('u', cleanUsername)
+  return `${base}/telegram/payment-links?${params.toString()}`
+}
+
+function buildTelegramAgentLauncherUrl(config: AppConfig, userId: string, username?: string) {
+  return buildTelegramDashboardUrl(config, userId, username, 'agent-wallets', 'hashpaylink-agent')
 }
 
 function agentDashboard(agent: AgentRegistration, config: AppConfig): CommandResult {
@@ -1907,8 +1928,62 @@ async function verifyAgentEndpoint(parsed: ParsedAgentRegistration & { error?: n
   }
 }
 
-async function callBuiltInAi(request: PaymentRequest, payer: string, config: AppConfig) {
+type HelperProfileResponse = {
+  ok?: boolean
+  profile?: { memorySummary?: string; displayName?: string } | null
+}
+
+function telegramMemoryOwner(userId: string) {
+  return `telegram:${userId}`
+}
+
+function telegramDisplayName(context: CommandContext, payer: string) {
+  const username = (context.username ?? '').replace(/^@+/, '').trim()
+  return username ? `@${username}` : payer || `Telegram ${context.userId}`
+}
+
+async function loadHelperMemory(config: AppConfig, context: CommandContext, payer: string) {
   const base = config.hashPayLinkBaseUrl.replace(/\/+$/, '')
+  const query = new URLSearchParams({
+    owner: telegramMemoryOwner(context.userId),
+    payer,
+    fallbackOwner: payer,
+  })
+  try {
+    const response = await fetchWithTimeout(`${base}/api/helper-profile?${query.toString()}`)
+    const data = await response.json() as HelperProfileResponse
+    if (response.ok && data.ok) return data.profile?.memorySummary ?? ''
+  } catch {
+    return ''
+  }
+  return ''
+}
+
+async function rememberHelperExchange(config: AppConfig, context: CommandContext, request: PaymentRequest, payer: string, answer: string) {
+  const base = config.hashPayLinkBaseUrl.replace(/\/+$/, '')
+  try {
+    await fetchWithTimeout(`${base}/api/helper-profile`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'save',
+        owner: telegramMemoryOwner(context.userId),
+        payer,
+        displayName: telegramDisplayName(context, payer),
+        telegramHandle: context.username,
+        accessEventId: request.id,
+        question: request.question ?? request.memo,
+        answer,
+      }),
+    })
+  } catch {
+    // Memory should never block a paid answer.
+  }
+}
+
+async function callBuiltInAi(request: PaymentRequest, payer: string, config: AppConfig, context: CommandContext) {
+  const base = config.hashPayLinkBaseUrl.replace(/\/+$/, '')
+  const memorySummary = await loadHelperMemory(config, context, payer)
   const response = await fetchWithTimeout(`${base}/api/agent-ask`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1916,6 +1991,7 @@ async function callBuiltInAi(request: PaymentRequest, payer: string, config: App
       eventId: request.id,
       payer,
       question: request.question ?? request.memo,
+      memorySummary: memorySummary || undefined,
     }),
   })
   const data = await response.json() as {
@@ -1927,9 +2003,10 @@ async function callBuiltInAi(request: PaymentRequest, payer: string, config: App
   if (!response.ok || !data.paymentVerified) {
     return { error: data.error ?? 'Payment is not verified on 0G yet. Try again shortly.' }
   }
-  return { answer: data.answer ?? 'No answer returned.', proof: data.proof }
+  const answer = data.answer ?? 'No answer returned.'
+  void rememberHelperExchange(config, context, request, payer, answer)
+  return { answer, proof: data.proof }
 }
-
 async function callExternalAgent(agent: AgentRegistration, request: PaymentRequest, payer: string, config: AppConfig) {
   const base = config.hashPayLinkBaseUrl.replace(/\/+$/, '')
   const verifyUrl = `${base}/api/agent-verify?eventId=${encodeURIComponent(request.id)}&payer=${encodeURIComponent(payer)}`
@@ -2092,7 +2169,7 @@ async function answerPaidAccessRequest(
     }
   }
 
-  const result = await callBuiltInAi(request, payer, config)
+  const result = await callBuiltInAi(request, payer, config, context)
   if ('error' in result) return { text: result.error ?? 'AI access failed.' }
   return {
     text: withFooter([
@@ -2200,14 +2277,23 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
   }
 
   if (cmd === '/polymarket') {
-    return { text: withFooter(POLYMARKET_HELP_LINES) }
+    return {
+      text: withFooter(POLYMARKET_HELP_LINES),
+      buttonRows: [
+        [
+          { text: 'Fund Polymarket', url: buildTelegramDashboardUrl(config, context.userId, context.username, 'market-tools', 'fund-polymarket') },
+          { text: 'LP Scout', url: buildTelegramDashboardUrl(config, context.userId, context.username, 'market-tools', 'lp-scout') },
+        ],
+        [{ text: 'Daily LP Research', url: buildTelegramDashboardUrl(config, context.userId, context.username, 'market-tools', 'agentic-lp-research') }],
+      ],
+    }
   }
 
   if (cmd === '/lphelp') {
     return { text: withFooter(LP_HELP_LINES) }
   }
 
-  if ((cmd === '/agent' && trimmed.split(/\s+/).length === 1) || cmd === '/agenthelp') {
+  if (cmd === '/agenthelp') {
     return { text: withFooter(AGENT_HELP_LINES) }
   }
 
@@ -2775,8 +2861,31 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
   }
 
   if (cmd === '/agent') {
-    const slug = normalizeAgentSlug(trimmed.split(/\s+/)[1] ?? config.defaultAgentSlug)
+    const rawSlug = trimmed.split(/\s+/)[1]
+    const slug = !rawSlug || ['agent', 'helper', 'hashpaylink', 'hash-paylink'].includes(rawSlug.toLowerCase())
+      ? config.defaultAgentSlug
+      : normalizeAgentSlug(rawSlug)
     if (!slug) return { text: `Use /agent ${config.defaultAgentSlug}.` }
+    if (slug === config.defaultAgentSlug) {
+      return {
+        text: withFooter([
+          'Hash PayLink Agent',
+          '',
+          'Use the helper as the front door for Hash PayLink services.',
+          'Choose Polymarket Tools for funding, LP Scout, and daily reports.',
+          'Choose StreamPay for ongoing USDC streams and retainers.',
+          '',
+          'Marketplace stays marked Soon while these core flows mature.',
+        ]),
+        buttonRows: [
+          [{ text: 'Open Helper', url: buildTelegramAgentLauncherUrl(config, context.userId, context.username) }],
+          [
+            { text: 'Polymarket Tools', url: buildTelegramDashboardUrl(config, context.userId, context.username, 'market-tools') },
+            { text: 'StreamPay', url: buildTelegramDashboardUrl(config, context.userId, context.username, 'streampay') },
+          ],
+        ],
+      }
+    }
     const agent = getAgent(context.store, config, slug)
     if (!agent) return { text: `Agent "${slug}" is not registered on Hash PayLink.` }
     const hydrated = await hydrateAgentWallet(agent, config)
@@ -3177,3 +3286,4 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
 
   return { text: 'Unknown command. Use /help.' }
 }
+

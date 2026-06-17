@@ -338,7 +338,7 @@ export function startPolymarketAlertWorker(config: AppConfig, store: ProfileStor
     return
   }
   if (!emailDeliveryReady(config)) {
-    console.warn('PolyDesk email alerts disabled: missing SENDGRID_API_KEY or ALERT_FROM_EMAIL.')
+    console.warn('PolyDesk email alerts disabled: missing RESEND_API_KEY or ALERT_FROM_EMAIL.')
     return
   }
 
