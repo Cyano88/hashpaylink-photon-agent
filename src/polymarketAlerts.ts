@@ -195,7 +195,7 @@ export async function checkPolymarketRisk(profile: UserProfile): Promise<Polymar
 export function formatPolymarketAlertStatus(profile: UserProfile, config: AppConfig) {
   const ready = emailDeliveryReady(config)
   return [
-    'Polymarket email alerts',
+    'PolyDesk email alerts',
     '',
     `Email: ${profile.email ?? 'not set'}`,
     `Wallet: ${profile.polymarketAddress ? shortAddress(profile.polymarketAddress) : 'not set'}`,
@@ -214,7 +214,7 @@ export function formatPolymarketAlertStatus(profile: UserProfile, config: AppCon
 
 function alertEmailText(address: string, alerts: PolymarketAlertCandidate[]) {
   return [
-    'Hash PayLink Polymarket risk alert',
+    'Hash PayLink PolyDesk risk alert',
     '',
     `Wallet: ${shortAddress(address)}`,
     `Positions at or below the risk threshold: ${alerts.length}`,
@@ -235,7 +235,7 @@ function alertEmailText(address: string, alerts: PolymarketAlertCandidate[]) {
 function alertEmailHtml(address: string, alerts: PolymarketAlertCandidate[]) {
   return [
     '<div style="font-family:Inter,Arial,sans-serif;color:#111827;line-height:1.5">',
-    '<h2 style="margin:0 0 12px">Hash PayLink Polymarket risk alert</h2>',
+    '<h2 style="margin:0 0 12px">Hash PayLink PolyDesk risk alert</h2>',
     `<p style="margin:0 0 16px;color:#4b5563">Wallet: ${escapeHtml(shortAddress(address))}<br/>Positions at or below the risk threshold: ${alerts.length}</p>`,
     ...alerts.map((alert, index) => [
       '<div style="border:1px solid #e5e7eb;border-radius:10px;padding:14px;margin:0 0 12px">',
@@ -252,7 +252,7 @@ function alertEmailHtml(address: string, alerts: PolymarketAlertCandidate[]) {
 
 function settlementEmailText(address: string, settlements: PolymarketSettlementCandidate[]) {
   return [
-    'Hash PayLink Polymarket resolved win alert',
+    'Hash PayLink PolyDesk resolved win alert',
     '',
     `Wallet: ${shortAddress(address)}`,
     `Resolved positive positions: ${settlements.length}`,
@@ -271,7 +271,7 @@ function settlementEmailText(address: string, settlements: PolymarketSettlementC
 function settlementEmailHtml(address: string, settlements: PolymarketSettlementCandidate[]) {
   return [
     '<div style="font-family:Inter,Arial,sans-serif;color:#111827;line-height:1.5">',
-    '<h2 style="margin:0 0 12px">Hash PayLink Polymarket resolved win alert</h2>',
+    '<h2 style="margin:0 0 12px">Hash PayLink PolyDesk resolved win alert</h2>',
     `<p style="margin:0 0 16px;color:#4b5563">Wallet: ${escapeHtml(shortAddress(address))}<br/>Resolved positive positions: ${settlements.length}</p>`,
     ...settlements.map((alert, index) => [
       '<div style="border:1px solid #d1fae5;border-radius:10px;padding:14px;margin:0 0 12px;background:#f0fdf4">',
@@ -304,7 +304,7 @@ export async function sendDuePolymarketAlerts(userId: string, profile: UserProfi
   if (due.length) {
     await sendEmail(config, {
       to: profile.email,
-      subject: `Polymarket alert: ${due.length} open position${due.length === 1 ? '' : 's'} down ${threshold(profile)}%+`,
+      subject: `PolyDesk alert: ${due.length} open position${due.length === 1 ? '' : 's'} down ${threshold(profile)}%+`,
       text: alertEmailText(profile.polymarketAddress, due),
       html: alertEmailHtml(profile.polymarketAddress, due),
     })
@@ -313,7 +313,7 @@ export async function sendDuePolymarketAlerts(userId: string, profile: UserProfi
   if (settlementDue.length) {
     await sendEmail(config, {
       to: profile.email,
-      subject: `Polymarket resolved win: ${settlementDue.length} position${settlementDue.length === 1 ? '' : 's'}`,
+      subject: `PolyDesk resolved win: ${settlementDue.length} position${settlementDue.length === 1 ? '' : 's'}`,
       text: settlementEmailText(profile.polymarketAddress, settlementDue),
       html: settlementEmailHtml(profile.polymarketAddress, settlementDue),
     })
@@ -334,11 +334,11 @@ export async function sendDuePolymarketAlerts(userId: string, profile: UserProfi
 
 export function startPolymarketAlertWorker(config: AppConfig, store: ProfileStore) {
   if (!config.emailEnabled) {
-    console.log('Polymarket email alerts disabled.')
+    console.log('PolyDesk email alerts disabled.')
     return
   }
   if (!emailDeliveryReady(config)) {
-    console.warn('Polymarket email alerts disabled: missing SENDGRID_API_KEY or ALERT_FROM_EMAIL.')
+    console.warn('PolyDesk email alerts disabled: missing SENDGRID_API_KEY or ALERT_FROM_EMAIL.')
     return
   }
 
@@ -361,7 +361,7 @@ export function startPolymarketAlertWorker(config: AppConfig, store: ProfileStor
     }
   }
 
-  console.log(`Polymarket email alerts enabled; checking every ${Math.round(intervalMs / 60_000)} minutes.`)
+  console.log(`PolyDesk email alerts enabled; checking every ${Math.round(intervalMs / 60_000)} minutes.`)
   void run()
   setInterval(() => void run(), intervalMs)
 }

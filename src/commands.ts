@@ -60,7 +60,7 @@ const HELP_LINES = [
   '/pay - create payment links',
   '/stream - StreamPay on Arc',
   '/agent - buyer and seller agents',
-  '/polymarket - LP Scout and daily reports',
+  '/polymarket - PolyDesk portfolio, funding, alerts, LP Scout',
   '/settings - saved wallets and defaults',
 ]
 
@@ -88,7 +88,9 @@ const STREAMPAY_HELP_LINES = [
 ]
 
 const POLYMARKET_HELP_LINES = [
-  'Polymarket',
+  'PolyDesk',
+  '',
+  'Fund Polymarket, track positions, get alerts, and ask LP Scout from Telegram.',
   '',
   '/lp x402 buyer-agent - one-time LP Scout',
   '/agenticstream 7d you@example.com - daily LP reports',
@@ -639,6 +641,11 @@ function isLikelySolanaAddress(value: string) {
 function commandName(text: string) {
   const first = text.trim().split(/\s+/)[0]?.toLowerCase() ?? ''
   return first.split('@')[0]
+}
+
+function isPolyDeskStart(text: string) {
+  const payload = text.trim().split(/\s+/).slice(1).join(' ').toLowerCase()
+  return ['polymarket', 'polydesk', 'poly-desk', 'poly'].includes(payload)
 }
 
 function promptForEvmRecipient(): CommandResult {
@@ -2170,6 +2177,10 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     }
   }
 
+  if (cmd === '/start' && isPolyDeskStart(trimmed)) {
+    return { text: withFooter(POLYMARKET_HELP_LINES) }
+  }
+
   if (cmd === '/start' || cmd === '/help') {
     return {
       text: withFooter([
@@ -2476,7 +2487,7 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
       await context.store.updateUser(context.userId, { polymarketEmailAlertsEnabled: true })
       return {
         text: withFooter([
-          'Polymarket email alerts enabled.',
+          'PolyDesk email alerts enabled.',
           '',
           `Email: ${profile.email}`,
           'Trigger: any unresolved open position at or below -30% PnL.',
@@ -2488,16 +2499,16 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
     }
     if (action === 'off') {
       await context.store.updateUser(context.userId, { polymarketEmailAlertsEnabled: false })
-      return { text: withFooter(['Polymarket email alerts disabled.']) }
+      return { text: withFooter(['PolyDesk email alerts disabled.']) }
     }
     if (action === 'check') {
       const checked = await checkPolymarketRisk(profile)
-      if (!checked.ok) return { text: checked.error ?? 'Could not check Polymarket alerts right now.' }
+      if (!checked.ok) return { text: checked.error ?? 'Could not check PolyDesk alerts right now.' }
       if (!checked.alerts.length && !checked.settlements.length) {
         await context.store.updateUser(context.userId, { polymarketAlertLastCheckedAt: Date.now() })
         return {
           text: withFooter([
-            'Polymarket alert check complete.',
+            'PolyDesk alert check complete.',
             '',
             'No unresolved open positions are currently at or below -30% PnL.',
             'No resolved winning positions were detected.',
@@ -2508,7 +2519,7 @@ export async function handleCommand(text: string, config: AppConfig, context: Co
         .catch(err => ({ sent: 0, checked: true, error: err instanceof Error ? err.message : String(err) }))
       return {
         text: withFooter([
-          'Polymarket alert check complete.',
+          'PolyDesk alert check complete.',
           '',
           `Risk positions: ${checked.alerts.length}`,
           ...checked.alerts.slice(0, 5).flatMap((alert, index) => [
